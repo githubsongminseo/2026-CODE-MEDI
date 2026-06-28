@@ -27,7 +27,6 @@ const state = {
   completed: false,
   report: null,
   nextCase: null,
-  selectedReportItemId: null,
 };
 
 const elements = Object.fromEntries(
@@ -38,8 +37,9 @@ const elements = Object.fromEntries(
     "closeRecordBtn", "chartToggle", "chartTitle", "chartPreview", "chartModal", "chartSummary", "chartFeed",
     "closeChartBtn", "difficultyLabel", "composer", "freeQuestion", "sendBtn", "startBtn", "resetBtn",
     "finishBtn", "reportPanel", "closeReportBtn",
-    "reportCoverage", "reportCoverageBar", "reportMissed", "reportReasoning", "missedList", "reportDetail",
-    "weaknessTags", "nextFocus", "nextCaseList", "nextCaseBtn",
+    "reportCoverage", "reportMissed", "reportReasoning", "reportSavedNote",
+    "criticalFailBanner", "coreChecklist", "emotionDetectedBanner", "emotionChecklist",
+    "ppiResults", "ppiNarrative", "recommendationContent", "nextCaseBtn",
   ].map((id) => [id, document.querySelector(`#${id}`)]),
 );
 
@@ -64,7 +64,8 @@ async function api(path, options = {}) {
     },
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `요청 실패 (${response.status})`);
+  const detail = typeof payload.detail === "string" ? payload.detail : null;
+  if (!response.ok) throw new Error(detail || payload.error || `요청 실패 (${response.status})`);
   return payload;
 }
 
@@ -89,6 +90,18 @@ function patientNameFromCase(caseItem) {
   return displayName?.replace(/\s*\([^)]*\)\s*$/, "").trim() || "환자";
 }
 
+function patientGenderFromCase(caseItem) {
+  const chart = caseItem?.chart || {};
+  const genderText = [
+    chart["나이_성별"],
+    chart["나이 성별"],
+    chart["성별"],
+    caseItem?.safe_metadata,
+  ].filter(Boolean).join(" ");
+  if (/(여성|여자|여환|female)/i.test(genderText)) return "female";
+  return "male";
+}
+
 function chartPreviewFromCase(caseItem) {
   const chart = caseItem?.chart || {};
   const demographics = chart["나이_성별"] || chart["나이 성별"];
@@ -98,6 +111,11 @@ function chartPreviewFromCase(caseItem) {
 
 function renderPatientName() {
   setText(elements.patientName, patientNameFromCase(state.currentCase));
+}
+
+function renderPatientSpriteProfile() {
+  if (!elements.patientSprite) return;
+  elements.patientSprite.classList.toggle("patient-female", patientGenderFromCase(state.currentCase) === "female");
 }
 
 function setPatientEmotionSprite(emotion) {
@@ -253,7 +271,7 @@ function toggleRecord(forceOpen) {
 async function startEncounter(options = {}) {
   if (!state.ready || state.sessionId || state.pending) return;
   const caseItem = options.caseItem || randomItem(state.cases);
-  const initialEmotion = randomItem(EMOTION_OPTIONS) || state.initialEmotion;
+  const initialEmotion = options.initialEmotion || randomItem(EMOTION_OPTIONS) || state.initialEmotion;
   if (!caseItem) {
     setText(elements.coachLine, "사용 가능한 케이스가 없습니다.");
     return;
@@ -275,6 +293,7 @@ async function startEncounter(options = {}) {
     state.selectedDifficulty = payload.session?.difficulty || state.selectedDifficulty;
     state.initialEmotion = payload.session?.initial_emotion || initialEmotion;
     renderPatientName();
+    renderPatientSpriteProfile();
     renderChart();
     setText(elements.coachLine, SESSION_START_COACH_MESSAGE);
     renderConversation();
@@ -319,162 +338,281 @@ async function submitQuestion(value) {
   }
 }
 
-function reportItems() {
-  const items = state.report?.items || [];
-  const priority = { missed: 0, needs_review: 1, completed: 2 };
-  return [...items].sort(
-    (left, right) => (priority[left.status] ?? 3) - (priority[right.status] ?? 3),
+const PPI_LABELS = {
+  "1": "효율적으로 묻고 들어주었다",
+  "2": "생각과 배경을 알아냈다",
+  "3": "이해하기 쉽게 설명하였다",
+  "4": "좋은 유대관계를 형성하였다",
+  "5": "면담을 체계적으로 이끌었다",
+  "6": "신체진찰 태도가 좋았다",
+};
+
+function reportItemsByCode() {
+  const map = new Map();
+  (state.report?.items || []).forEach((item) => {
+    if (item?.id) map.set(item.id, item);
+  });
+  return map;
+}
+
+function labelForEvaluationCode(code) {
+  return reportItemsByCode().get(code)?.label || code;
+}
+
+function appendRawDebug(container, title, raw) {
+  if (!container) return;
+  container.replaceChildren();
+  container.append(createTextElement("p", "empty-state", title));
+  const pre = createTextElement("pre", "raw-debug", String(raw || ""));
+  container.append(pre);
+}
+
+function checklistResults(checklistAxis) {
+  const core = checklistAxis?.core_results || {};
+  const emotion = checklistAxis?.emotion_response?.results || {};
+  return [...Object.values(core), ...Object.values(emotion)].filter((value) => {
+    return value && typeof value === "object" && ["O", "X"].includes(value.result);
+  });
+}
+
+function ppiRatingValue(rating) {
+  const match = String(rating ?? "").match(/\d+(\.\d+)?/);
+  if (!match) return null;
+  const value = Number(match[0]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function ppiAverage(ppiAxis) {
+  const ratings = Object.values(ppiAxis?.ppi_results || {})
+    .map((item) => ppiRatingValue(item?.rating))
+    .filter((value) => value !== null);
+  if (!ratings.length) return null;
+  const average = ratings.reduce((sum, value) => sum + value, 0) / ratings.length;
+  return average.toFixed(1).replace(/\.0$/, "");
+}
+
+function renderEvaluationRows(container, items, emptyText) {
+  if (!container) return;
+  container.replaceChildren();
+  const entries = Object.entries(items || {});
+  if (!entries.length) {
+    container.append(createTextElement("p", "empty-state", emptyText));
+    return;
+  }
+
+  entries.forEach(([code, value]) => {
+    const result = value && typeof value === "object" ? value : {};
+    const passed = result.result === "O";
+    const mark = passed ? "O" : "X";
+    const row = document.createElement("div");
+    row.className = `evaluation-row ${passed ? "passed" : "failed"}`;
+    row.append(createTextElement("span", `evaluation-mark ${passed ? "pass" : "fail"}`, mark));
+    row.append(createTextElement("span", "evaluation-code", code));
+
+    const body = document.createElement("div");
+    body.className = "evaluation-row-body";
+    body.append(createTextElement("strong", "", labelForEvaluationCode(code)));
+    const evidence = String(result.evidence || "").trim();
+    if (evidence) body.append(createTextElement("p", "", evidence));
+    row.append(body);
+    container.append(row);
+  });
+}
+
+function renderCriticalFails(checklistAxis) {
+  if (!elements.criticalFailBanner) return;
+  const banner = elements.criticalFailBanner;
+  banner.replaceChildren();
+  banner.className = "critical-fail-banner";
+
+  if (checklistAxis?._parse_error) {
+    banner.classList.add("error");
+    banner.append(createTextElement("strong", "", "체크리스트 평가 응답을 해석하지 못했습니다."));
+    banner.append(createTextElement("pre", "raw-debug", String(checklistAxis._raw || "")));
+    return;
+  }
+
+  const criticalFails = Array.isArray(checklistAxis?.critical_fails_triggered)
+    ? checklistAxis.critical_fails_triggered
+    : [];
+  if (!criticalFails.length) {
+    banner.classList.add("success");
+    banner.append(createTextElement("strong", "", "Critical Fail 없음"));
+    banner.append(createTextElement("span", "", "환자 안전과 면담 기본 원칙을 크게 위반한 항목은 감지되지 않았습니다."));
+    return;
+  }
+
+  const evidence = checklistAxis?.critical_fail_evidence || {};
+  banner.classList.add("fail");
+  banner.append(createTextElement("strong", "", `Critical Fail 발생: ${criticalFails.length}개`));
+  const list = document.createElement("ul");
+  criticalFails.forEach((code) => {
+    const item = createTextElement("li", "", `${labelForEvaluationCode(code)} (${code})`);
+    const detail = String(evidence[code] || "").trim();
+    if (detail) item.append(createTextElement("span", "", detail));
+    list.append(item);
+  });
+  banner.append(list);
+}
+
+function renderEmotionResponse(emotionResponse) {
+  const detected = Array.isArray(emotionResponse?.detected_emotions)
+    ? emotionResponse.detected_emotions
+    : [];
+  setText(
+    elements.emotionDetectedBanner,
+    detected.length
+      ? `감지된 환자 감정: ${detected.join(", ")}`
+      : "뚜렷한 감정 반응이 감지되지 않았습니다.",
+  );
+  renderEvaluationRows(
+    elements.emotionChecklist,
+    emotionResponse?.results || {},
+    "감정 대응 평가 항목이 없습니다.",
   );
 }
 
-function renderReportList() {
-  elements.missedList.replaceChildren();
-  reportItems().forEach((item) => {
-    const listItem = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `report-item-button status-${item.status || "unknown"}`;
-    button.setAttribute("aria-pressed", String(item.id === state.selectedReportItemId));
-    const statusLabel = item.status === "missed"
-      ? "놓친 항목"
-      : item.status === "needs_review"
-        ? "보완 필요"
-        : "확인 완료";
-    button.append(createTextElement("span", "", `${item.category} · ${statusLabel}`));
-    button.append(createTextElement("strong", "", item.label));
-    button.append(createTextElement("small", "", item.feedback));
-    button.addEventListener("click", () => {
-      state.selectedReportItemId = item.id;
-      renderReportList();
-      renderReportDetail();
-    });
-    listItem.append(button);
-    elements.missedList.append(listItem);
-  });
-}
-
-function renderReportDetail() {
-  elements.reportDetail.replaceChildren();
-  const item = reportItems().find((entry) => entry.id === state.selectedReportItemId);
-  if (!item) {
-    elements.reportDetail.append(createTextElement("p", "empty-state", "표시할 피드백이 없습니다."));
+function renderPpiRows(ppiAxis) {
+  if (ppiAxis?._parse_error) {
+    appendRawDebug(elements.ppiResults, "PPI 평가 응답을 해석하지 못했습니다.", ppiAxis._raw);
+    if (elements.ppiNarrative) elements.ppiNarrative.replaceChildren();
     return;
   }
-  elements.reportDetail.append(createTextElement("h3", "", item.label));
-  elements.reportDetail.append(createTextElement("p", "detail-summary", item.feedback));
 
-  const whySection = document.createElement("section");
-  whySection.className = "detail-section";
-  whySection.append(createTextElement("h4", "", "왜 중요한가"));
-  whySection.append(createTextElement("p", "detail-copy", item.why_it_matters));
-  elements.reportDetail.append(whySection);
-
-  const learnerSection = document.createElement("section");
-  learnerSection.className = "detail-section";
-  learnerSection.append(createTextElement("h4", "", "내 기록"));
-  const learnerEvidence = Array.isArray(item.learner_evidence) ? item.learner_evidence : [];
-  if (learnerEvidence.length) {
-    const list = document.createElement("ul");
-    learnerEvidence.forEach((entry) => list.append(createTextElement("li", "", entry)));
-    learnerSection.append(list);
-  } else {
-    learnerSection.append(createTextElement("p", "detail-copy", "관련 질문 기록이 없습니다."));
+  if (!elements.ppiResults) return;
+  elements.ppiResults.replaceChildren();
+  const entries = Object.entries(ppiAxis?.ppi_results || {});
+  if (!entries.length) {
+    elements.ppiResults.append(createTextElement("p", "empty-state", "PPI 평가 항목이 없습니다."));
   }
-  elements.reportDetail.append(learnerSection);
 
-  const evidence = Array.isArray(item.evidence) ? item.evidence : [];
-  const validEvidence = evidence.filter((entry) => {
-    if (!entry || typeof entry.title !== "string" || typeof entry.url !== "string") return false;
-    try {
-      return ["http:", "https:"].includes(new URL(entry.url).protocol);
-    } catch {
-      return false;
-    }
+  entries.forEach(([key, value]) => {
+    const row = document.createElement("div");
+    row.className = "ppi-row";
+    const body = document.createElement("div");
+    body.append(createTextElement("strong", "", PPI_LABELS[key] || key));
+    const reason = String(value?.reason || "").trim();
+    if (reason) body.append(createTextElement("p", "", reason));
+    row.append(body);
+    row.append(createTextElement("span", "ppi-rating", String(value?.rating ?? "-")));
+    elements.ppiResults.append(row);
   });
-  if (validEvidence.length) {
-    const evidenceSection = document.createElement("section");
-    evidenceSection.className = "detail-section";
-    evidenceSection.append(createTextElement("h4", "", "관련 근거"));
-    const list = document.createElement("ul");
-    validEvidence.forEach((entry) => {
-      const listItem = document.createElement("li");
-      const link = document.createElement("a");
-      link.href = entry.url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.textContent = entry.title;
-      listItem.append(link);
-      list.append(listItem);
-    });
-    evidenceSection.append(list);
-    elements.reportDetail.append(evidenceSection);
-  }
+
+  renderNarrativeFeedback(ppiAxis?.narrative_feedback);
 }
 
-function renderNextPractice() {
-  elements.weaknessTags.replaceChildren();
-  elements.nextCaseList.replaceChildren();
-  const reviewItems = state.report.items.filter((item) => ["missed", "needs_review"].includes(item.status));
-  reviewItems.slice(0, 4).forEach((item) => {
-    elements.weaknessTags.append(createTextElement("span", "", item.label));
+function renderNarrativeFeedback(narrative) {
+  if (!elements.ppiNarrative) return;
+  elements.ppiNarrative.replaceChildren();
+  const sections = [
+    { key: "strengths", title: "잘한 점" },
+    { key: "areas_to_improve", title: "보완하면 좋을 점" },
+    { key: "must_fix", title: "다음엔 반드시 고칠 점" },
+  ];
+
+  sections.forEach(({ key, title }) => {
+    const items = Array.isArray(narrative?.[key]) ? narrative[key] : [];
+    if (!items.length) return;
+    const section = document.createElement("section");
+    section.className = `narrative-block ${key}`;
+    section.append(createTextElement("h4", "", title));
+    const list = document.createElement("ul");
+    items.forEach((text) => list.append(createTextElement("li", "", text)));
+    section.append(list);
+    elements.ppiNarrative.append(section);
   });
-  const modeLabel = state.nextCase?.mode === "progression" ? "확장 연습" : "보완 연습";
-  if (!reviewItems.length && state.nextCase?.mode === "progression") {
-    elements.weaknessTags.append(createTextElement("span", "", "새로운 계통 적용"));
+}
+
+function renderRecommendation() {
+  if (!elements.recommendationContent) return;
+  elements.recommendationContent.replaceChildren();
+  const recommendation = state.report?.recommendation;
+  const weakness = state.report?.weakness_analysis;
+  if (!recommendation) {
+    elements.recommendationContent.append(createTextElement("p", "empty-state", "추천 정보가 없습니다."));
+    elements.nextCaseBtn.hidden = true;
+    return;
   }
-  const directions = state.nextCase?.directions || [];
-  const nextFocus = directions[0] || "같은 핵심 문진을 유지하며 질문 순서를 반복합니다.";
-  setText(elements.nextFocus, `${modeLabel} · ${nextFocus}`);
-  directions.slice(1).forEach((direction) => {
-    elements.nextCaseList.append(createTextElement("li", "", direction));
-  });
+
+  const counts = weakness?.category_counts || {};
+  const countsLine = Object.entries(counts)
+    .filter(([, count]) => Number(count) > 0)
+    .map(([category, count]) => `${category} X ${count}개`)
+    .join(" · ") || "없음";
+  elements.recommendationContent.append(createTextElement("p", "recommendation-kicker", `부족했던 영역: ${countsLine}`));
+  if (recommendation.message) {
+    elements.recommendationContent.append(createTextElement("p", "recommendation-message", recommendation.message));
+  }
+  if (recommendation.recommended_case_id) {
+    const next = [
+      recommendation.recommended_case_title,
+      recommendation.recommended_emotion,
+      recommendation.recommended_difficulty,
+    ].filter(Boolean).join(" · ");
+    elements.recommendationContent.append(createTextElement("p", "recommendation-next", `다음 추천: ${next}`));
+  }
+  if (recommendation.case_pool_note) {
+    elements.recommendationContent.append(createTextElement("p", "recommendation-note", recommendation.case_pool_note));
+  }
+
   const recommendedCase = state.nextCase?.case;
   elements.nextCaseBtn.hidden = !recommendedCase;
   if (recommendedCase) {
-    setText(elements.nextCaseBtn, "랜덤 케이스 시작");
+    const caseTitle = recommendation.recommended_case_title || recommendedCase.title || "추천";
+    setText(elements.nextCaseBtn, `${caseTitle} 케이스 시작`);
   }
 }
 
-function assessmentPayload() {
-  return {
-    problem_summary: "대화 종료 후 외부 평가 모델을 연결할 예정입니다.",
-    primary_impression: "외부 평가 모델 연결 예정",
-    differential_diagnoses: "외부 평가 모델 연결 예정",
-    reasoning: "현재 데모에서는 대화 종료 즉시 리포트를 확인합니다.",
-  };
+function renderEvaluationReport() {
+  const checklistAxis = state.report?.checklist_axis || {};
+  const ppiAxis = state.report?.ppi_axis || {};
+  const results = checklistResults(checklistAxis);
+  const passed = results.filter((item) => item.result === "O").length;
+  const criticalFails = Array.isArray(checklistAxis.critical_fails_triggered)
+    ? checklistAxis.critical_fails_triggered
+    : [];
+  const ppi = ppiAverage(ppiAxis);
+
+  setText(elements.reportCoverage, results.length ? `${passed}/${results.length}` : "-");
+  setText(elements.reportMissed, String(criticalFails.length));
+  setText(elements.reportReasoning, ppi ? `${ppi}/5` : "-");
+  setText(
+    elements.reportSavedNote,
+    state.report?.report_id ? `평가 저장 ID: ${state.report.report_id.slice(0, 8)}...` : "",
+  );
+
+  renderCriticalFails(checklistAxis);
+  renderEvaluationRows(
+    elements.coreChecklist,
+    checklistAxis.core_results || {},
+    "체크리스트 평가 항목이 없습니다.",
+  );
+  renderEmotionResponse(checklistAxis.emotion_response);
+  renderPpiRows(ppiAxis);
+  renderRecommendation();
 }
 
 async function finishEncounter() {
   if (!state.session?.can_complete || state.pending || state.completed) return;
   state.pending = true;
+  setText(elements.coachLine, "대화를 평가하는 중입니다. 체크리스트와 PPI 평가를 생성하고 있어요.");
   renderStatus();
   try {
     const payload = await api(`/api/sessions/${encodeURIComponent(state.sessionId)}/complete`, {
       method: "POST",
-      body: JSON.stringify({ assessment: assessmentPayload() }),
+      body: JSON.stringify({ assessment: {} }),
     });
     state.completed = true;
     state.report = payload.report;
     state.nextCase = payload.next_case;
-    const items = reportItems();
-    state.selectedReportItemId = items[0]?.id || null;
-    const coveragePercent = Math.max(0, Math.min(100, Number(state.report.coverage_percent) || 0));
-    setText(elements.reportCoverage, `${coveragePercent}%`);
-    if (elements.reportCoverageBar) {
-      elements.reportCoverageBar.style.width = `${coveragePercent}%`;
-    }
-    setText(elements.reportMissed, String(state.report.items.filter((item) => item.status === "missed").length));
-    setText(elements.reportReasoning, String(state.report.assessment_review_count));
-    renderReportList();
-    renderReportDetail();
-    renderNextPractice();
+    renderEvaluationReport();
     toggleRecord(false);
     elements.reportPanel.parentElement.scrollTo({ top: 0, behavior: "auto" });
     elements.reportPanel.hidden = false;
     elements.reportPanel.focus({ preventScroll: true });
     setText(elements.patientBubble, "대화가 종료됐습니다. 교육용 리포트를 확인해 주세요.");
     setPatientEmotionSprite(null);
-    setText(elements.coachLine, "리포트는 진단 스프레드시트와 데모 카드의 비공개 형성평가 기준으로 생성했습니다.");
+    setText(elements.coachLine, "체크리스트, 감정 대응, PPI 평가표를 확인해 주세요.");
     positionPatientBubble(elements.patientBubble.textContent);
     elements.coachSprite.classList.add("writing");
   } catch (error) {
@@ -491,9 +629,9 @@ function resetEncounter() {
   state.completed = false;
   state.report = null;
   state.nextCase = null;
-  state.selectedReportItemId = null;
   state.currentCase = null;
   renderPatientName();
+  renderPatientSpriteProfile();
   setPatientEmotionSprite(null);
   elements.reportPanel.hidden = true;
   elements.recordModal.hidden = true;
@@ -509,8 +647,19 @@ function resetEncounter() {
 
 async function startRandomFollowupCase() {
   if (state.pending) return;
+  const recommendedCase = state.nextCase?.case || null;
+  const nextDifficulty = (state.nextCase?.constraints || [])
+    .find((item) => item.startsWith("next_difficulty="))
+    ?.split("=")[1];
+  const nextEmotion = (state.nextCase?.constraints || [])
+    .find((item) => item.startsWith("next_initial_emotion="))
+    ?.split("=")[1];
   resetEncounter();
-  await startEncounter();
+  if (nextDifficulty) state.selectedDifficulty = nextDifficulty;
+  await startEncounter({
+    caseItem: recommendedCase,
+    initialEmotion: nextEmotion,
+  });
 }
 
 function closeReport() {
@@ -558,6 +707,7 @@ window.addEventListener("resize", () => positionPatientBubble(elements.patientBu
 
 renderConversation();
 renderPatientName();
+renderPatientSpriteProfile();
 renderChart();
 renderStatus();
 loadCases();

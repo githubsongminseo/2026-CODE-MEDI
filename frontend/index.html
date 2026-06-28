@@ -125,40 +125,54 @@
           </header>
           <div class="report-grid">
             <div>
-              <span>Coverage</span>
-              <strong id="reportCoverage">0%</strong>
-              <div class="coverage-meter" aria-hidden="true">
-                <span id="reportCoverageBar"></span>
-              </div>
+              <span>체크리스트</span>
+              <strong id="reportCoverage">0/0</strong>
+              <small>O / 전체</small>
             </div>
             <div>
-              <span>Missed</span>
+              <span>Critical Fail</span>
               <strong id="reportMissed">0</strong>
             </div>
             <div>
-              <span>판단 보완</span>
-              <strong id="reportReasoning">0</strong>
+              <span>PPI 평균</span>
+              <strong id="reportReasoning">-</strong>
             </div>
           </div>
-          <div class="report-layout">
-            <section class="report-list-panel" aria-label="Report findings">
-              <h3>확인할 피드백</h3>
-              <ul class="missed-list" id="missedList"></ul>
+          <div class="evaluation-layout">
+            <section class="evaluation-section" aria-label="Checklist evaluation">
+              <div class="section-heading">
+                <h3>체크리스트 평가</h3>
+                <span>SPIKES 기반 O/X</span>
+              </div>
+              <p class="report-saved-note" id="reportSavedNote"></p>
+              <div id="criticalFailBanner"></div>
+              <div class="evaluation-table" id="coreChecklist"></div>
             </section>
-            <article class="report-detail" id="reportDetail" aria-live="polite">
-              <p class="empty-state">피드백을 선택하면 상세 내용을 확인할 수 있습니다.</p>
-            </article>
+            <section class="evaluation-section" aria-label="Emotion response evaluation">
+              <div class="section-heading">
+                <h3>감정 반응 대응 평가</h3>
+                <span>환자 감정 인식과 반응</span>
+              </div>
+              <p class="emotion-detected-banner" id="emotionDetectedBanner"></p>
+              <div class="evaluation-table" id="emotionChecklist"></div>
+            </section>
+            <section class="evaluation-section" aria-label="PPI evaluation">
+              <div class="section-heading">
+                <h3>PPI 평가</h3>
+                <span>환자 관점 면담 평가</span>
+              </div>
+              <div class="ppi-results" id="ppiResults"></div>
+              <div class="narrative-grid" id="ppiNarrative"></div>
+            </section>
+            <section class="evaluation-section" aria-label="Adaptive next case direction">
+              <div class="section-heading">
+                <h3>약점 분석 및 다음 추천</h3>
+                <span>다음 연습 목표</span>
+              </div>
+              <div class="recommendation-content" id="recommendationContent"></div>
+              <button class="primary-command" id="nextCaseBtn" type="button" hidden>추천 케이스 시작</button>
+            </section>
           </div>
-          <section class="weakness-panel" aria-label="Adaptive next case direction">
-            <div>
-              <p class="eyebrow">Next practice</p>
-              <h3>다음 연습 목표</h3>
-            </div>
-            <div class="weakness-tags" id="weaknessTags"></div>
-            <p class="next-focus" id="nextFocus"></p>
-            <ul class="next-case-list" id="nextCaseList"></ul>
-            <button class="primary-command" id="nextCaseBtn" type="button" hidden>추천 케이스 시작</button>
-          </section>
         </section>
       </section>
     </main>
