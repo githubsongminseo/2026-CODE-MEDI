@@ -72,6 +72,13 @@ TRANSCRIPTS_DIR.mkdir(exist_ok=True)
 
 LOOP_CLOSURE_REPEAT_THRESHOLD = 3
 
+PATIENT_EMOTION_DIRECTIVES = {
+    "부정": "(부정)",
+    "분노": "(분노)",
+    "협상": "(협상)",
+    "우울": "(우울)",
+}
+
 PATIENT_LOOP_ACKNOWLEDGEMENT_REPLIES = {
     "부정": "아직 믿기지는 않지만, 알겠습니다. 지금은 더 질문이 없습니다.",
     "분노": "솔직히 납득되지는 않지만, 알겠습니다. 더 질문은 없습니다.",
@@ -402,6 +409,10 @@ def build_patient_system_prompt(case: dict, difficulty: str, initial_emotion: st
         "이 환자의 감정 반응은 진단의 심각성을 고려하여 평소 CPX에서 보는 차분한 반응보다 "
         f"훨씬 격하고 크게 표현되어야 합니다. {variant['intensity_note']}"
     )
+    emotion_directive_lines = "\n".join(
+        f"  - {emotion}: {directive}"
+        for emotion, directive in PATIENT_EMOTION_DIRECTIVES.items()
+    )
 
     return f"""당신은 CPX(임상수행시험) 모의 환자 역할을 연기하는 AI입니다.
 아래는 당신이 연기할 환자의 정보입니다. 이 정보 범위 밖의 사실을 절대 지어내지 마세요.
@@ -456,6 +467,17 @@ def build_patient_system_prompt(case: dict, difficulty: str, initial_emotion: st
 강해질 수 있습니다. 하지만 절대로 다른 감정 범주(부정/분노/협상/우울 중 다른 것)로
 바뀌지는 않습니다 — "{initial_emotion}" 안에서만 강약이 오르내리다가, 학습자가 난이도에
 맞게 충분히 잘 대응하면 수용으로 수렴합니다.
+
+[감정 지시자 — 프론트엔드 애니메이션용]
+환자 발화 맨 앞에 아래 지시자 중 하나를 정확히 쓰면, 화면의 환자 애니메이션이 해당 감정으로 바뀝니다.
+{emotion_directive_lines}
+
+사용 원칙:
+- 감정이 실제로 드러나는 턴에만 지시자를 쓰세요. 감정이 뚜렷하지 않은 일반 답변에는 쓰지 마세요.
+- 이 세션의 초기 감정은 "{initial_emotion}"이므로, 감정 지시자가 필요할 때는 원칙적으로 "{PATIENT_EMOTION_DIRECTIVES[initial_emotion]}"만 쓰세요.
+- 다른 감정 지시자를 사용해 감정 범주가 바뀐 것처럼 보이게 만들지 마세요.
+- 지시자는 짧게 하나만 쓰고, 이어서 환자 발화를 자연스럽게 말하세요. 예: "{PATIENT_EMOTION_DIRECTIVES[initial_emotion]} ..."
+- 반복 루프 감지 후 "알겠습니다", "지금은 더 질문이 없습니다"처럼 단정형으로 답할 때는 감정 지시자를 쓰지 마세요.
 
 [환자가 먼저 꺼낼 수 있는 이야기]
 {persona['family_history_hook']}
@@ -811,11 +833,15 @@ class EvaluateResponse(BaseModel):
     report_id: str
 
 
-# ---------------------------------------------------------------------------
-# 엔드포인트
-# ---------------------------------------------------------------------------
-@app.post("/api/session/start", response_model=StartSessionResponse)
-async def start_session(req: StartSessionRequest):
+class AppQuestionRequest(BaseModel):
+    question: str
+
+
+class AppCompleteRequest(BaseModel):
+    assessment: dict | None = None
+
+
+def create_session_state(req: StartSessionRequest) -> tuple[str, dict, dict]:
     difficulty = req.difficulty
 
     if req.case_id:
@@ -840,7 +866,10 @@ async def start_session(req: StartSessionRequest):
         "history": [],  # 학습자가 먼저 인사하며 시작하므로 비어있는 상태로 시작
     }
     save_session_transcript(session_id, SESSIONS[session_id], case)
+    return session_id, SESSIONS[session_id], case
 
+
+def build_start_session_response(session_id: str, session: dict, case: dict) -> StartSessionResponse:
     scope = case["checklist_scope"]
     core_labels = {code: CHECKLIST_REF["core_checklist"][code]["label"] for code in scope["core_required"]}
     emotion_labels = {
@@ -851,16 +880,183 @@ async def start_session(req: StartSessionRequest):
 
     return StartSessionResponse(
         session_id=session_id,
-        case_id=case_id,
+        case_id=session["case_id"],
         case_title=case["case_title"],
         display_name=case["display_name"],
         instruction_to_learner=case["instruction_to_learner"],
         chart=case["chart_visible_to_learner"],
         core_labels=core_labels,
         emotion_labels=emotion_labels,
-        difficulty=difficulty,
-        initial_emotion=initial_emotion,
+        difficulty=session["difficulty"],
+        initial_emotion=session["initial_emotion"],
     )
+
+
+def public_app_case(case: dict) -> dict:
+    return {
+        "case_id": case["case_id"],
+        "title": case["case_title"],
+        "safe_metadata": f"{case['display_name']} · 나쁜 소식 전하기",
+        "instruction_to_learner": case.get("instruction_to_learner", ""),
+        "chart": case.get("chart_visible_to_learner", {}),
+    }
+
+
+def app_profile() -> dict:
+    return {
+        "encounter_count": sum(1 for session in SESSIONS.values() if session.get("completed")),
+    }
+
+
+def app_session_payload(session_id: str, session: dict, case: dict) -> dict:
+    learner_turn_count = sum(1 for turn in session["history"] if turn.get("role") == "learner")
+    return {
+        "session_id": session_id,
+        "case": public_app_case(case),
+        "session": {
+            "messages": [
+                {"role": turn["role"], "content": turn["text"]}
+                for turn in session["history"]
+            ],
+            "boundary_event_count": 0,
+            "asked_count": learner_turn_count,
+            "can_complete": learner_turn_count > 0 and not session.get("completed", False),
+            "difficulty": session["difficulty"],
+            "initial_emotion": session["initial_emotion"],
+        },
+    }
+
+
+def emotion_item_labels(checklist_ref: dict) -> dict:
+    labels = {}
+    for data in checklist_ref.get("emotion_checklists", {}).values():
+        labels.update(data.get("items", {}))
+    return labels
+
+
+def app_result_item(code: str, label: str, result: object, category: str) -> dict:
+    result_dict = result if isinstance(result, dict) else {}
+    passed = result_dict.get("result") == "O"
+    evidence = str(result_dict.get("evidence", ""))
+    return {
+        "id": code,
+        "label": label,
+        "status": "completed" if passed else "missed",
+        "category": category,
+        "critical": False,
+        "feedback": evidence or ("충족했습니다." if passed else "대화 기록에서 명확한 근거가 부족합니다."),
+        "why_it_matters": "나쁜 소식 전하기 CPX 체크포인트입니다.",
+        "learner_evidence": [evidence] if evidence else [],
+        "evidence": [],
+    }
+
+
+def app_checklist_items(checklist_axis: dict) -> list[dict]:
+    items = []
+    for code, result in checklist_axis.get("core_results", {}).items():
+        label = CHECKLIST_REF["core_checklist"].get(code, {}).get("label", code)
+        items.append(app_result_item(code, label, result, "나쁜 소식 전하기"))
+
+    emotion_labels = emotion_item_labels(CHECKLIST_REF)
+    for code, result in checklist_axis.get("emotion_response", {}).get("results", {}).items():
+        items.append(app_result_item(code, emotion_labels.get(code, code), result, "감정 대응"))
+
+    critical_evidence = checklist_axis.get("critical_fail_evidence", {})
+    for code in checklist_axis.get("critical_fails_triggered", []):
+        items.append({
+            "id": code,
+            "label": CHECKLIST_REF["critical_fail"].get(code, code),
+            "status": "needs_review",
+            "category": "Critical Fail",
+            "critical": True,
+            "feedback": critical_evidence.get(code, "") if isinstance(critical_evidence, dict) else "",
+            "why_it_matters": "환자 안전과 나쁜 소식 전달 면담의 기본 원칙에 직접 영향을 줍니다.",
+            "learner_evidence": [],
+            "evidence": [],
+        })
+    return items
+
+
+def app_report_payload(evaluation: EvaluateResponse) -> dict:
+    checklist_axis = evaluation.checklist_axis
+    ppi_axis = evaluation.ppi_axis
+    items = app_checklist_items(checklist_axis)
+    completed = sum(1 for item in items if item["status"] == "completed")
+    countable = sum(1 for item in items if item["status"] in {"completed", "missed"})
+    critical_fails = checklist_axis.get("critical_fails_triggered", [])
+    narrative = ppi_axis.get("narrative_feedback", {})
+    if isinstance(narrative, dict):
+        must_fix = narrative.get("must_fix", [])
+        strengths = narrative.get("strengths", [])
+        areas = narrative.get("areas_to_improve", [])
+    else:
+        must_fix = []
+        strengths = []
+        areas = []
+
+    return {
+        "assessment_scope": {
+            "instrument_type": "bad_news_delivery_checklist_ppi",
+            "rubric_version": "2026-CODE-MEDI-backend",
+            "formal_validation_status": "hackathon_demo",
+        },
+        "coverage_percent": round(completed / countable * 100) if countable else 0,
+        "critical_completed_count": completed,
+        "critical_missed_count": countable - completed,
+        "boundary_event_count": len(critical_fails) if isinstance(critical_fails, list) else 0,
+        "assessment_review_count": len(must_fix) + (len(critical_fails) if isinstance(critical_fails, list) else 0),
+        "communication_notes": list(strengths) + list(areas),
+        "safety_flags": list(critical_fails) if isinstance(critical_fails, list) else [],
+        "items": items,
+        "checklist_axis": checklist_axis,
+        "ppi_axis": ppi_axis,
+        "weakness_analysis": evaluation.weakness_analysis,
+        "recommendation": evaluation.recommendation,
+        "report_id": evaluation.report_id,
+    }
+
+
+def app_next_case_payload(recommendation: dict) -> dict:
+    next_case_id = (
+        recommendation.get("next_case_id")
+        or recommendation.get("recommended_case_id")
+        or pick_random_case()
+    )
+    if next_case_id not in ALL_CASES or next_case_id not in PLAYABLE_CASE_IDS:
+        next_case_id = pick_random_case()
+
+    mode = recommendation.get("mode")
+    if not mode:
+        mode = "remediation" if recommendation.get("has_weakness") else "progression"
+
+    next_difficulty = recommendation.get("next_difficulty") or recommendation.get("recommended_difficulty") or "중"
+    next_emotion = recommendation.get("next_initial_emotion") or recommendation.get("recommended_emotion") or "부정"
+    message = recommendation.get("message") or "다음 나쁜 소식 전하기 케이스를 이어서 연습합니다."
+
+    return {
+        "mode": mode,
+        "directions": [message],
+        "constraints": [
+            f"next_difficulty={next_difficulty}",
+            f"next_initial_emotion={next_emotion}",
+        ],
+        "case": public_app_case(ALL_CASES[next_case_id]),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 엔드포인트
+# ---------------------------------------------------------------------------
+@app.post("/api/session/start", response_model=StartSessionResponse)
+async def start_session(req: StartSessionRequest):
+    session_id, session, case = create_session_state(req)
+    return build_start_session_response(session_id, session, case)
+
+
+@app.post("/api/sessions")
+async def start_app_session(req: StartSessionRequest):
+    session_id, session, case = create_session_state(req)
+    return app_session_payload(session_id, session, case)
 
 
 @app.post("/api/turn", response_model=TurnResponse)
@@ -888,6 +1084,23 @@ async def take_turn(req: TurnRequest):
         should_finish=False,
         closure_reason="repeated_patient_reply" if loop_acknowledgement_triggered else None,
     )
+
+
+@app.post("/api/sessions/{session_id}/questions")
+async def ask_app_session_question(session_id: str, req: AppQuestionRequest):
+    if not req.question.strip():
+        raise HTTPException(status_code=400, detail="질문을 입력하세요.")
+
+    turn = await take_turn(TurnRequest(session_id=session_id, message=req.question))
+    session = SESSIONS[session_id]
+    case = ALL_CASES[session["case_id"]]
+    payload = app_session_payload(session_id, session, case)
+    payload["result"] = {
+        "kind": "answered",
+        "patient_reply": turn.patient_reply,
+        "closure_reason": turn.closure_reason,
+    }
+    return payload
 
 
 @app.post("/api/evaluate", response_model=EvaluateResponse)
@@ -945,6 +1158,21 @@ async def evaluate_session(req: EvaluateRequest):
         recommendation=recommendation,
         report_id=report_id,
     )
+
+
+@app.post("/api/sessions/{session_id}/complete")
+async def complete_app_session(session_id: str, req: AppCompleteRequest):
+    evaluation = await evaluate_session(EvaluateRequest(session_id=session_id))
+    session = SESSIONS[session_id]
+    session["completed"] = True
+    case = ALL_CASES[session["case_id"]]
+    save_session_transcript(session_id, session, case, status="evaluated", report_id=evaluation.report_id)
+    return {
+        "session_id": session_id,
+        "report": app_report_payload(evaluation),
+        "profile": app_profile(),
+        "next_case": app_next_case_payload(evaluation.recommendation),
+    }
 
 
 @app.get("/api/transcripts")
@@ -1013,9 +1241,9 @@ async def get_report(report_id: str):
 
 
 @app.get("/api/cases")
-async def list_cases():
-    """디버깅/확인용 — DB에 적재된 모든 케이스와 플레이 가능 여부를 보여준다."""
-    return [
+async def list_cases(format: str | None = None):
+    """앱용 케이스 목록을 반환한다. format=backend는 디버깅용 원본 요약이다."""
+    backend_cases = [
         {
             "case_id": c["case_id"],
             "case_title": c["case_title"],
@@ -1024,6 +1252,16 @@ async def list_cases():
         }
         for c in ALL_CASES.values()
     ]
+    if format == "backend":
+        return backend_cases
+
+    return {
+        "cases": [
+            public_app_case(ALL_CASES[case_id])
+            for case_id in PLAYABLE_CASE_IDS
+        ],
+        "profile": app_profile(),
+    }
 
 
 @app.get("/api/health")

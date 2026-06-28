@@ -1,686 +1,168 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>CODE:MEDI — CPX 프로토타입</title>
-<style>
-  :root {
-    --navy: #14467A;
-    --navy-dark: #0E3258;
-    --bg: #F4F6F8;
-    --card: #FFFFFF;
-    --text: #1C2530;
-    --muted: #6B7785;
-    --border: #DDE3E9;
-    --ok: #1B8A5A;
-    --fail: #C0392B;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: "Pretendard", -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-    background: var(--bg);
-    color: var(--text);
-  }
-  .app {
-    max-width: 760px;
-    margin: 0 auto;
-    padding: 24px 16px 80px;
-  }
-  header h1 {
-    font-size: 20px;
-    margin: 0 0 4px;
-    color: var(--navy-dark);
-  }
-  header p {
-    margin: 0 0 20px;
-    color: var(--muted);
-    font-size: 14px;
-  }
-  .instruction-box {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-left: 4px solid var(--navy);
-    border-radius: 8px;
-    padding: 14px 16px;
-    margin-bottom: 16px;
-    font-size: 14px;
-    line-height: 1.5;
-  }
-  .instruction-box b { color: var(--navy-dark); }
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>CODE MEDI CPX Room</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell" aria-label="CODE MEDI CPX serious simulation app">
+      <section class="cpx-device" aria-label="CPX practice console">
+        <header class="console-bar">
+          <span class="square-button-spacer" aria-hidden="true"></span>
+          <div>
+            <p class="eyebrow">데모 케이스 | 환자 역할 시뮬레이션</p>
+            <h1>CODE MEDI CPX ROOM</h1>
+          </div>
+          <button class="square-button reset" id="resetBtn" type="button" aria-label="Reset encounter">X</button>
+        </header>
 
-  .chart-panel {
-    background: #FAFBFC;
-    border: 1px dashed var(--navy);
-    border-radius: 8px;
-    padding: 14px 16px;
-    margin-bottom: 14px;
-    font-size: 13px;
-  }
-  .chart-panel dl { margin: 0; }
-  .chart-panel dt { font-weight: 700; color: var(--navy-dark); margin-top: 8px; }
-  .chart-panel dt:first-child { margin-top: 0; }
-  .chart-panel dd { margin: 2px 0 0; color: var(--text); }
+        <section class="scene-stage" aria-label="Single CPX encounter scene">
+          <img class="room-art" src="./assets/pixel/background.png" alt="" aria-hidden="true" />
 
-  .chat-window {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    min-height: 360px;
-    max-height: 480px;
-    overflow-y: auto;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  .bubble {
-    max-width: 78%;
-    padding: 10px 14px;
-    border-radius: 14px;
-    font-size: 14px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-  }
-  .bubble.patient {
-    align-self: flex-start;
-    background: #EEF2F6;
-    border-top-left-radius: 4px;
-  }
-  .bubble.learner {
-    align-self: flex-end;
-    background: var(--navy);
-    color: white;
-    border-top-right-radius: 4px;
-  }
-  .bubble .role-label {
-    display: block;
-    font-size: 11px;
-    color: var(--muted);
-    margin-bottom: 2px;
-  }
-  .bubble.learner .role-label { color: #C9D8E8; }
+          <div class="patient-zone">
+            <div class="sprite patient-sprite" id="patientSprite" aria-label="표준화 환자"></div>
+            <p class="patient-name" id="patientName">환자</p>
+          </div>
 
-  .input-row {
-    display: flex;
-    gap: 8px;
-    margin-top: 12px;
-  }
-  .input-row input {
-    flex: 1;
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-size: 14px;
-  }
-  .input-row input:focus { outline: 2px solid var(--navy); }
-  button {
-    border: none;
-    border-radius: 8px;
-    padding: 12px 18px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .btn-primary { background: var(--navy); color: white; }
-  .btn-primary:hover { background: var(--navy-dark); }
-  .btn-primary:disabled { background: #A9B7C5; cursor: not-allowed; }
-  .btn-secondary { background: #fff; color: var(--navy); border: 1px solid var(--navy); }
+          <div class="learner-zone">
+            <div class="sprite learner-sprite" id="learnerSprite" aria-label="학습자"></div>
+            <p class="learner-name">학습자</p>
+          </div>
 
-  .action-row {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 14px;
-  }
+          <div class="speech-panel patient-speech" id="patientBubble" aria-live="polite">
+            대화 시작을 누른 뒤 질문을 입력하면 환자가 답변합니다.
+          </div>
 
-  .status-line {
-    font-size: 12px;
-    color: var(--muted);
-    margin-top: 6px;
-    min-height: 16px;
-  }
+          <div class="speech-panel learner-speech" id="learnerBubble" aria-live="polite" hidden></div>
 
-  /* 리포트 화면 */
-  .report { display: none; }
-  .report.visible { display: block; }
-  .report-section {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 18px;
-    margin-bottom: 16px;
-  }
-  .report-section h2 {
-    font-size: 16px;
-    margin: 0 0 12px;
-    color: var(--navy-dark);
-  }
-  .cf-banner {
-    background: #FDECEA;
-    border: 1px solid var(--fail);
-    color: var(--fail);
-    border-radius: 8px;
-    padding: 12px 14px;
-    font-size: 14px;
-    margin-bottom: 16px;
-    font-weight: 600;
-  }
-  .checklist-row {
-    display: flex;
-    gap: 10px;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-  }
-  .checklist-row:last-child { border-bottom: none; }
-  .mark { font-weight: 700; width: 18px; flex-shrink: 0; }
-  .mark.O { color: var(--ok); }
-  .mark.X { color: var(--muted); }
-  .checklist-row .code { width: 48px; flex-shrink: 0; color: var(--muted); }
-  .checklist-row .evidence { color: var(--muted); font-size: 12px; display: block; margin-top: 2px; }
+          <button class="record-toggle" id="recordToggle" type="button" aria-controls="recordModal" aria-expanded="false">
+            <span>진단 스프레드시트</span>
+            <strong id="recordCount">기록 없음</strong>
+            <small id="recordPreview">아직 기록 없음</small>
+          </button>
 
-  .ppi-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 10px 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .ppi-row:last-child { border-bottom: none; }
-  .ppi-rating {
-    font-size: 12px;
-    font-weight: 700;
-    padding: 3px 10px;
-    border-radius: 12px;
-    background: #EEF2F6;
-    color: var(--navy-dark);
-    flex-shrink: 0;
-  }
-  .ppi-reason { color: var(--muted); font-size: 12px; margin-top: 2px; }
+          <button class="chart-toggle" id="chartToggle" type="button" aria-controls="chartModal" aria-expanded="false" disabled>
+            <span>환자 차트</span>
+            <strong id="chartTitle">대기 중</strong>
+            <small id="chartPreview">대화 시작 후 확인</small>
+          </button>
+        </section>
 
-  .raw-debug {
-    font-size: 11px;
-    color: var(--muted);
-    white-space: pre-wrap;
-    background: #FAFBFC;
-    padding: 10px;
-    border-radius: 6px;
-    margin-top: 8px;
-  }
-</style>
-</head>
-<body>
-<div class="app">
-  <header>
-    <h1>CODE:MEDI CPX 프로토타입</h1>
-    <p>F1 · 새로운 진단 전달 — 이지현 케이스 (E1–E18 + C1 한정)</p>
-  </header>
+        <section class="coach-strip" aria-label="CPX 코치 안내">
+          <div class="coach-portrait">
+            <div class="sprite coach-sprite" id="coachSprite" aria-label="CPX 코치"></div>
+          </div>
+          <div class="coach-copy">
+            <p class="speaker">CPX 코치</p>
+            <p id="coachLine">난이도를 선택한 뒤 대화 시작을 눌러 케이스를 시작하세요.</p>
+          </div>
+        </section>
 
-  <div id="screen-difficulty">
-    <div class="instruction-box">
-      <b>모의 문진을 시작하기 전, 난이도를 선택하세요.</b><br/>
-      난이도가 높을수록 (1) 환자가 감정을 드러내는 단서(표정·말투 지시문)가 줄어들고,
-      (2) 환자가 수용 단계로 넘어가기까지 더 많이, 더 일관되게 공감하고 설명해줘야 합니다
-      (쉽게 설득되지 않는 완고한 성향).
-    </div>
-    <div class="action-row" style="justify-content:center;gap:12px;">
-      <button class="btn-secondary diff-btn" data-difficulty="하">하 (단서 많음 · 쉽게 설득됨)</button>
-      <button class="btn-secondary diff-btn" data-difficulty="중">중 (기본)</button>
-      <button class="btn-secondary diff-btn" data-difficulty="상">상 (단서 적음 · 설득 어려움)</button>
-    </div>
-  </div>
+        <section class="dialogue-box" aria-label="학습자 입력">
+          <section class="difficulty-control" aria-label="난이도 선택">
+            <div>
+              <p class="eyebrow">난이도</p>
+              <strong id="difficultyLabel">중</strong>
+            </div>
+            <div class="difficulty-options" role="group" aria-label="난이도">
+              <button class="difficulty-option" type="button" data-difficulty="하">하</button>
+              <button class="difficulty-option active" type="button" data-difficulty="중">중</button>
+              <button class="difficulty-option" type="button" data-difficulty="상">상</button>
+            </div>
+          </section>
 
-  <div id="screen-chat" style="display:none;">
-    <div class="instruction-box" id="instruction-box">불러오는 중...</div>
+          <form class="free-ask" id="composer">
+            <label for="freeQuestion">환자에게 질문하기</label>
+            <div>
+              <input id="freeQuestion" type="text" placeholder="시작 시점, 증상, 병력 등을 질문하세요." disabled />
+              <button id="sendBtn" type="submit" disabled>질문</button>
+            </div>
+          </form>
 
-    <button class="btn-secondary" id="chart-toggle-btn" style="margin-bottom:12px;">📋 환자 차트 보기</button>
-    <div class="chart-panel" id="chart-panel" style="display:none;"></div>
+          <div class="command-row">
+            <button class="primary-command" id="startBtn" type="button">대화 시작</button>
+            <button class="secondary-command" id="finishBtn" type="button" disabled>대화 종료</button>
+          </div>
+        </section>
 
-    <div class="chat-window" id="chat-window"></div>
+        <section class="record-modal" id="recordModal" aria-label="진단 스프레드시트" hidden>
+          <header>
+            <div>
+              <p class="eyebrow">Question / Answer log</p>
+              <h2>진단 스프레드시트</h2>
+            </div>
+            <button class="square-button reset" id="closeRecordBtn" type="button" aria-label="Close record">X</button>
+          </header>
+          <div class="record-feed" id="recordFeed">
+            <p class="empty-state">질문과 환자 응답이 여기에 기록됩니다.</p>
+          </div>
+        </section>
 
-    <div class="input-row">
-      <input id="message-input" type="text" placeholder="환자에게 할 말을 입력하세요" disabled />
-      <button class="btn-primary" id="send-btn" disabled>전송</button>
-    </div>
-    <div class="status-line" id="status-line"></div>
+        <section class="chart-modal" id="chartModal" aria-label="환자 차트" hidden>
+          <header>
+            <div>
+              <p class="eyebrow">환자 정보</p>
+              <h2>환자 차트</h2>
+            </div>
+            <button class="square-button reset" id="closeChartBtn" type="button" aria-label="Close chart">X</button>
+          </header>
+          <div class="chart-summary" id="chartSummary">
+            <p class="empty-state">대화를 시작하면 환자 정보가 표시됩니다.</p>
+          </div>
+          <div class="chart-feed" id="chartFeed"></div>
+        </section>
 
-    <div class="action-row">
-      <button class="btn-secondary" id="restart-btn">난이도 다시 선택</button>
-      <button class="btn-primary" id="finish-btn" disabled>문진 종료하고 평가받기</button>
-    </div>
-  </div>
+        <section class="report-sheet" id="reportPanel" aria-label="CPX educational report" tabindex="-1" hidden>
+          <header>
+            <div>
+              <p class="eyebrow">Educational feedback</p>
+              <h2>CPX Report</h2>
+            </div>
+            <button class="square-button reset" id="closeReportBtn" type="button" aria-label="Close report">X</button>
+          </header>
+          <div class="report-grid">
+            <div>
+              <span>Coverage</span>
+              <strong id="reportCoverage">0%</strong>
+              <div class="coverage-meter" aria-hidden="true">
+                <span id="reportCoverageBar"></span>
+              </div>
+            </div>
+            <div>
+              <span>Missed</span>
+              <strong id="reportMissed">0</strong>
+            </div>
+            <div>
+              <span>판단 보완</span>
+              <strong id="reportReasoning">0</strong>
+            </div>
+          </div>
+          <div class="report-layout">
+            <section class="report-list-panel" aria-label="Report findings">
+              <h3>확인할 피드백</h3>
+              <ul class="missed-list" id="missedList"></ul>
+            </section>
+            <article class="report-detail" id="reportDetail" aria-live="polite">
+              <p class="empty-state">피드백을 선택하면 상세 내용을 확인할 수 있습니다.</p>
+            </article>
+          </div>
+          <section class="weakness-panel" aria-label="Adaptive next case direction">
+            <div>
+              <p class="eyebrow">Next practice</p>
+              <h3>다음 연습 목표</h3>
+            </div>
+            <div class="weakness-tags" id="weaknessTags"></div>
+            <p class="next-focus" id="nextFocus"></p>
+            <ul class="next-case-list" id="nextCaseList"></ul>
+            <button class="primary-command" id="nextCaseBtn" type="button" hidden>추천 케이스 시작</button>
+          </section>
+        </section>
+      </section>
+    </main>
 
-  <div class="report" id="screen-report">
-    <div class="report-section" id="cf-section"></div>
-
-    <div class="report-section">
-      <h2>① 체크리스트 평가 (SPIKES 기반, O/X)</h2>
-      <div id="core-checklist"></div>
-    </div>
-
-    <div class="report-section">
-      <h2>② 감정 반응 대응 평가</h2>
-      <div id="emotion-detected-banner" style="margin-bottom:10px;font-size:13px;color:var(--muted);"></div>
-      <div id="emotion-checklist"></div>
-    </div>
-
-    <div class="report-section">
-      <h2>③ PPI 평가 (환자 관점)</h2>
-      <div id="ppi-results"></div>
-      <div id="ppi-narrative"></div>
-    </div>
-
-    <div class="report-section" id="recommendation-section">
-      <h2>④ 약점 분석 및 다음 추천</h2>
-      <div id="recommendation-content"></div>
-    </div>
-
-    <div class="action-row">
-      <button class="btn-secondary" id="back-to-chat-btn">대화 기록으로 돌아가기</button>
-      <button class="btn-primary" id="retry-recommended-btn" style="display:none;">추천 케이스로 재도전</button>
-    </div>
-  </div>
-</div>
-
-<script>
-const API_BASE = window.location.protocol === "file:" ? "http://localhost:8000" : "";
-
-let sessionId = null;
-let coreLabels = {};
-let emotionLabels = {};
-let isBusy = false;
-let hasCompletedTurn = false;
-let sessionClosing = false;
-let sessionGeneration = 0;
-
-const chatWindow = document.getElementById("chat-window");
-const messageInput = document.getElementById("message-input");
-const sendBtn = document.getElementById("send-btn");
-const finishBtn = document.getElementById("finish-btn");
-const restartBtn = document.getElementById("restart-btn");
-const statusLine = document.getElementById("status-line");
-const instructionBox = document.getElementById("instruction-box");
-const screenChat = document.getElementById("screen-chat");
-const screenReport = document.getElementById("screen-report");
-const backToChatBtn = document.getElementById("back-to-chat-btn");
-const chartToggleBtn = document.getElementById("chart-toggle-btn");
-const chartPanel = document.getElementById("chart-panel");
-const screenDifficulty = document.getElementById("screen-difficulty");
-const retryRecommendedBtn = document.getElementById("retry-recommended-btn");
-const recommendationContent = document.getElementById("recommendation-content");
-
-let currentDifficulty = "중";
-
-function addBubble(role, text) {
-  const bubble = document.createElement("div");
-  bubble.className = `bubble ${role}`;
-  const label = document.createElement("span");
-  label.className = "role-label";
-  label.textContent = role === "patient" ? "환자" : "나 (학습자)";
-  bubble.appendChild(label);
-  bubble.appendChild(document.createTextNode(text));
-  chatWindow.appendChild(bubble);
-  chatWindow.scrollTop = chatWindow.scrollHeight;
-}
-
-function syncControls(msg) {
-  const hasSession = Boolean(sessionId);
-  const canSend = hasSession && !isBusy && !sessionClosing;
-  sendBtn.disabled = !canSend;
-  messageInput.disabled = !canSend;
-  finishBtn.disabled = !hasSession || isBusy || !hasCompletedTurn;
-  if (msg !== undefined) statusLine.textContent = msg;
-}
-
-function setBusy(busy, msg = "") {
-  isBusy = busy;
-  syncControls(msg);
-}
-
-async function startSession(difficulty, caseId, initialEmotion) {
-  const generation = ++sessionGeneration;
-  currentDifficulty = difficulty;
-  sessionId = null;
-  coreLabels = {};
-  emotionLabels = {};
-  hasCompletedTurn = false;
-  sessionClosing = false;
-  screenDifficulty.style.display = "none";
-  screenChat.style.display = "block";
-  screenReport.classList.remove("visible");
-
-  chatWindow.innerHTML = "";
-  messageInput.value = "";
-  chartPanel.style.display = "none";
-  chartToggleBtn.textContent = "📋 환자 차트 보기";
-  setBusy(true, "케이스를 불러오는 중...");
-  try {
-    const body = { difficulty };
-    if (caseId) body.case_id = caseId;
-    if (initialEmotion) body.initial_emotion = initialEmotion;
-    const res = await fetch(`${API_BASE}/api/session/start`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`서버 응답 오류 (${res.status})`);
-    const data = await res.json();
-    if (generation !== sessionGeneration) return;
-    sessionId = data.session_id;
-    coreLabels = data.core_labels;
-    emotionLabels = data.emotion_labels;
-    instructionBox.innerHTML = `<b>${data.display_name}</b> · ${data.case_title} · 난이도: ${data.difficulty} · 초기 감정: ${data.initial_emotion}<br/>${data.instruction_to_learner}`;
-    renderChartPanel(data.chart);
-    setBusy(false, "당신이 먼저 인사하며 문진을 시작하세요 (예: '안녕하세요, 담당 의료진 OOO입니다.')");
-  } catch (err) {
-    if (generation !== sessionGeneration) return;
-    sessionId = null;
-    setBusy(false, "");
-    instructionBox.textContent = `백엔드 연결 실패: ${err.message}. 백엔드 서버(localhost:8000)가 실행 중인지 확인하세요.`;
-  }
-}
-
-function renderChartPanel(chart) {
-  const dl = document.createElement("dl");
-  Object.entries(chart).forEach(([key, val]) => {
-    if (key === "_comment") return;
-    const dt = document.createElement("dt");
-    dt.textContent = key.replace(/_/g, " ");
-    const dd = document.createElement("dd");
-    dd.textContent = val;
-    dl.appendChild(dt);
-    dl.appendChild(dd);
-  });
-  chartPanel.innerHTML = "";
-  chartPanel.appendChild(dl);
-}
-
-chartToggleBtn.addEventListener("click", () => {
-  const isHidden = chartPanel.style.display === "none";
-  chartPanel.style.display = isHidden ? "block" : "none";
-  chartToggleBtn.textContent = isHidden ? "📋 환자 차트 닫기" : "📋 환자 차트 보기";
-});
-
-async function sendMessage() {
-  const text = messageInput.value.trim();
-  if (!text || !sessionId || isBusy || sessionClosing) return;
-  const activeSessionId = sessionId;
-  const generation = sessionGeneration;
-
-  addBubble("learner", text);
-  messageInput.value = "";
-  setBusy(true, "환자가 응답을 작성하는 중...");
-
-  try {
-    const res = await fetch(`${API_BASE}/api/turn`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: activeSessionId, message: text }),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || `서버 응답 오류 (${res.status})`);
-    }
-    const data = await res.json();
-    if (generation !== sessionGeneration || sessionId !== activeSessionId) return;
-    addBubble("patient", data.patient_reply);
-    hasCompletedTurn = true;
-    sessionClosing = Boolean(data.should_finish);
-    const nextStatus = sessionClosing
-      ? "환자가 면담을 마무리하려 합니다. 문진 종료 후 평가를 진행하세요."
-      : "";
-    setBusy(false, nextStatus);
-  } catch (err) {
-    if (generation !== sessionGeneration || sessionId !== activeSessionId) return;
-    setBusy(false, `오류: ${err.message}`);
-  }
-}
-
-function renderChecklistRows(container, items, refLabels) {
-  container.innerHTML = "";
-  Object.entries(items).forEach(([code, val]) => {
-    const row = document.createElement("div");
-    row.className = "checklist-row";
-    const mark = val.result === "O" ? "O" : "X";
-    row.innerHTML = `
-      <span class="mark ${mark}">${mark}</span>
-      <span class="code">${code}</span>
-      <span>
-        ${refLabels[code] || ""}
-        <span class="evidence">${val.evidence || ""}</span>
-      </span>
-    `;
-    container.appendChild(row);
-  });
-}
-
-function renderPPI(container, ppiResults) {
-  container.innerHTML = "";
-  const labels = {
-    "1": "효율적으로 묻고 들어주었다",
-    "2": "생각과 배경을 알아냈다",
-    "3": "이해하기 쉽게 설명하였다",
-    "4": "좋은 유대관계를 형성하였다",
-    "5": "면담을 체계적으로 이끌었다",
-    "6": "신체진찰 태도가 좋았다",
-  };
-  Object.entries(ppiResults).forEach(([key, val]) => {
-    const row = document.createElement("div");
-    row.className = "ppi-row";
-    row.innerHTML = `
-      <div>
-        <div>${labels[key] || key}</div>
-        <div class="ppi-reason">${val.reason || ""}</div>
-      </div>
-      <span class="ppi-rating">${val.rating}</span>
-    `;
-    container.appendChild(row);
-  });
-}
-
-function renderNarrativeFeedback(container, narrative) {
-  if (!narrative) { container.innerHTML = ""; return; }
-  const sections = [
-    { key: "strengths", title: "✅ 잘한 점", color: "var(--ok)" },
-    { key: "areas_to_improve", title: "🔧 보완하면 좋을 점", color: "#B8860B" },
-    { key: "must_fix", title: "⚠ 다음엔 반드시 고칠 점", color: "var(--fail)" },
-  ];
-  container.innerHTML = "";
-  sections.forEach(({ key, title, color }) => {
-    const items = narrative[key] || [];
-    if (items.length === 0) return;
-    const box = document.createElement("div");
-    box.style.marginTop = "14px";
-    const h = document.createElement("div");
-    h.style.fontWeight = "700";
-    h.style.color = color;
-    h.style.marginBottom = "6px";
-    h.textContent = title;
-    box.appendChild(h);
-    const ul = document.createElement("ul");
-    ul.style.margin = "0";
-    ul.style.paddingLeft = "18px";
-    ul.style.fontSize = "13px";
-    ul.style.lineHeight = "1.6";
-    items.forEach((text) => {
-      const li = document.createElement("li");
-      li.textContent = text;
-      ul.appendChild(li);
-    });
-    box.appendChild(ul);
-    container.appendChild(box);
-  });
-}
-
-function renderEmotionResponse(bannerEl, listEl, emotionResponse) {
-  if (!emotionResponse) {
-    bannerEl.textContent = "";
-    listEl.innerHTML = "";
-    return;
-  }
-  const detected = emotionResponse.detected_emotions || [];
-  bannerEl.textContent = detected.length > 0
-    ? `이 대화에서 감지된 환자 감정: ${detected.join(", ")}`
-    : "이 대화에서 뚜렷한 감정 반응(부정/분노/협상/우울/수용)이 감지되지 않았습니다.";
-
-  if (emotionResponse.results) {
-    renderChecklistRows(listEl, emotionResponse.results, emotionLabels);
-  } else {
-    listEl.innerHTML = "";
-  }
-}
-
-async function finishAndEvaluate() {
-  if (!sessionId || !hasCompletedTurn || isBusy) return;
-  const activeSessionId = sessionId;
-  const generation = sessionGeneration;
-  setBusy(true, "대화를 평가하는 중... (체크리스트 + PPI 두 번 호출)");
-
-  try {
-    const res = await fetch(`${API_BASE}/api/evaluate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: activeSessionId }),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || `서버 응답 오류 (${res.status})`);
-    }
-    const data = await res.json();
-    if (generation !== sessionGeneration || sessionId !== activeSessionId) return;
-    renderReport(data);
-    screenChat.style.display = "none";
-    screenReport.classList.add("visible");
-    setBusy(false, "");
-  } catch (err) {
-    if (generation !== sessionGeneration || sessionId !== activeSessionId) return;
-    setBusy(false, `평가 실패: ${err.message}`);
-  }
-}
-
-function renderReport(data) {
-  const cfSection = document.getElementById("cf-section");
-
-  let savedNote = document.getElementById("report-saved-note");
-  if (!savedNote) {
-    savedNote = document.createElement("div");
-    savedNote.id = "report-saved-note";
-    savedNote.style.fontSize = "12px";
-    savedNote.style.color = "var(--muted)";
-    savedNote.style.marginBottom = "8px";
-    cfSection.parentElement.insertBefore(savedNote, cfSection);
-  }
-  savedNote.textContent = data.report_id
-    ? `이 평가는 레포트로 저장되었습니다 (ID: ${data.report_id.slice(0, 8)}...)`
-    : "";
-
-  const cfList = data.checklist_axis.critical_fails_triggered || [];
-  if (cfList.length > 0) {
-    const ev = data.checklist_axis.critical_fail_evidence || {};
-    cfSection.innerHTML = `<div class="cf-banner">⚠ Critical Fail 발생: ${cfList.join(", ")}<br/>${
-      cfList.map(c => ev[c] || "").join("<br/>")
-    }</div>`;
-  } else if (data.checklist_axis._parse_error) {
-    cfSection.innerHTML = `<div class="raw-debug">체크리스트 평가 응답을 해석하지 못했습니다. 원본 응답:\n${data.checklist_axis._raw}</div>`;
-  } else {
-    cfSection.innerHTML = `<div class="cf-banner" style="background:#EAF7EF;border-color:var(--ok);color:var(--ok);">Critical Fail 없음</div>`;
-  }
-
-  if (data.checklist_axis.core_results) {
-    renderChecklistRows(document.getElementById("core-checklist"), data.checklist_axis.core_results, coreLabels);
-  }
-  renderEmotionResponse(
-    document.getElementById("emotion-detected-banner"),
-    document.getElementById("emotion-checklist"),
-    data.checklist_axis.emotion_response
-  );
-
-  if (data.ppi_axis.ppi_results) {
-    renderPPI(document.getElementById("ppi-results"), data.ppi_axis.ppi_results);
-    renderNarrativeFeedback(document.getElementById("ppi-narrative"), data.ppi_axis.narrative_feedback);
-  } else if (data.ppi_axis._parse_error) {
-    document.getElementById("ppi-results").innerHTML = `<div class="raw-debug">PPI 평가 응답을 해석하지 못했습니다. 원본 응답:\n${data.ppi_axis._raw}</div>`;
-  }
-
-  renderRecommendation(data.recommendation, data.weakness_analysis);
-}
-
-function renderRecommendation(rec, weakness) {
-  if (!rec) {
-    recommendationContent.innerHTML = "";
-    retryRecommendedBtn.style.display = "none";
-    return;
-  }
-
-  const counts = weakness?.category_counts || {};
-  const countsLine = Object.entries(counts)
-    .filter(([, n]) => n > 0)
-    .map(([cat, n]) => `${cat} X${n}개`)
-    .join(" · ") || "없음";
-
-  let html = `<div style="font-size:13px;color:var(--muted);margin-bottom:8px;">이번 시도에서 부족했던 영역: ${countsLine}</div>`;
-  html += `<div style="font-size:14px;margin-bottom:10px;">${rec.message}</div>`;
-
-  if (rec.recommended_case_id) {
-    html += `<div style="font-size:13px;">다음 추천: <b>${rec.recommended_case_title}</b> 케이스, 초기 감정 <b>${rec.recommended_emotion}</b>, <b>${rec.recommended_difficulty}</b> 난이도</div>`;
-  }
-  if (rec.case_pool_note) {
-    html += `<div style="font-size:12px;color:var(--muted);margin-top:6px;">${rec.case_pool_note}</div>`;
-  }
-  recommendationContent.innerHTML = html;
-
-  if (rec.recommended_case_id) {
-    retryRecommendedBtn.style.display = "inline-block";
-    retryRecommendedBtn.textContent = `"${rec.recommended_case_title}" (${rec.recommended_emotion}) 케이스로 재도전`;
-    retryRecommendedBtn.dataset.recommendedDifficulty = rec.recommended_difficulty;
-    retryRecommendedBtn.dataset.recommendedCaseId = rec.recommended_case_id;
-    retryRecommendedBtn.dataset.recommendedEmotion = rec.recommended_emotion;
-  } else {
-    retryRecommendedBtn.style.display = "none";
-  }
-}
-
-sendBtn.addEventListener("click", sendMessage);
-messageInput.addEventListener("keydown", (e) => { if (e.key === "Enter") sendMessage(); });
-finishBtn.addEventListener("click", finishAndEvaluate);
-
-document.querySelectorAll(".diff-btn").forEach((btn) => {
-  btn.addEventListener("click", () => startSession(btn.dataset.difficulty));
-});
-
-restartBtn.addEventListener("click", () => {
-  sessionGeneration += 1;
-  sessionId = null;
-  hasCompletedTurn = false;
-  sessionClosing = false;
-  isBusy = false;
-  syncControls("");
-  screenChat.style.display = "none";
-  screenDifficulty.style.display = "block";
-});
-
-backToChatBtn.addEventListener("click", () => {
-  screenReport.classList.remove("visible");
-  screenChat.style.display = "block";
-});
-
-retryRecommendedBtn.addEventListener("click", () => {
-  const diff = retryRecommendedBtn.dataset.recommendedDifficulty || currentDifficulty;
-  const caseId = retryRecommendedBtn.dataset.recommendedCaseId || null;
-  const emotion = retryRecommendedBtn.dataset.recommendedEmotion || null;
-  screenReport.classList.remove("visible");
-  startSession(diff, caseId, emotion);
-});
-
-// 첫 메시지가 오면 종료 버튼 활성화 상태를 다시 계산한다.
-const observer = new MutationObserver(() => {
-  syncControls();
-});
-observer.observe(chatWindow, { childList: true });
-
-syncControls("");
-// 첫 화면은 난이도 선택 화면 (screen-difficulty가 기본으로 보이는 상태이므로 별도 호출 불필요)
-</script>
-</body>
+    <script src="./app.js" defer></script>
+  </body>
 </html>
