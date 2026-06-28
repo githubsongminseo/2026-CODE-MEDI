@@ -291,6 +291,7 @@ let coreLabels = {};
 let emotionLabels = {};
 let isBusy = false;
 let hasCompletedTurn = false;
+let sessionClosing = false;
 let sessionGeneration = 0;
 
 const chatWindow = document.getElementById("chat-window");
@@ -324,10 +325,11 @@ function addBubble(role, text) {
 }
 
 function syncControls(msg) {
-  const canUseSession = Boolean(sessionId) && !isBusy;
-  sendBtn.disabled = !canUseSession;
-  messageInput.disabled = !canUseSession;
-  finishBtn.disabled = !canUseSession || !hasCompletedTurn;
+  const hasSession = Boolean(sessionId);
+  const canSend = hasSession && !isBusy && !sessionClosing;
+  sendBtn.disabled = !canSend;
+  messageInput.disabled = !canSend;
+  finishBtn.disabled = !hasSession || isBusy || !hasCompletedTurn;
   if (msg !== undefined) statusLine.textContent = msg;
 }
 
@@ -343,6 +345,7 @@ async function startSession(difficulty, caseId, initialEmotion) {
   coreLabels = {};
   emotionLabels = {};
   hasCompletedTurn = false;
+  sessionClosing = false;
   screenDifficulty.style.display = "none";
   screenChat.style.display = "block";
   screenReport.classList.remove("visible");
@@ -401,7 +404,7 @@ chartToggleBtn.addEventListener("click", () => {
 
 async function sendMessage() {
   const text = messageInput.value.trim();
-  if (!text || !sessionId || isBusy) return;
+  if (!text || !sessionId || isBusy || sessionClosing) return;
   const activeSessionId = sessionId;
   const generation = sessionGeneration;
 
@@ -423,7 +426,11 @@ async function sendMessage() {
     if (generation !== sessionGeneration || sessionId !== activeSessionId) return;
     addBubble("patient", data.patient_reply);
     hasCompletedTurn = true;
-    setBusy(false, "");
+    sessionClosing = Boolean(data.should_finish);
+    const nextStatus = sessionClosing
+      ? "환자가 면담을 마무리하려 합니다. 문진 종료 후 평가를 진행하세요."
+      : "";
+    setBusy(false, nextStatus);
   } catch (err) {
     if (generation !== sessionGeneration || sessionId !== activeSessionId) return;
     setBusy(false, `오류: ${err.message}`);
@@ -646,6 +653,7 @@ restartBtn.addEventListener("click", () => {
   sessionGeneration += 1;
   sessionId = null;
   hasCompletedTurn = false;
+  sessionClosing = false;
   isBusy = false;
   syncControls("");
   screenChat.style.display = "none";

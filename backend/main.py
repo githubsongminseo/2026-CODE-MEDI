@@ -14,6 +14,7 @@ cases/ 폴더의 각 JSON 파일 중 ready_for_play=true인 것만 실제 플레
 import json
 import os
 import random
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -69,6 +70,17 @@ REPORTS_DIR.mkdir(exist_ok=True)
 TRANSCRIPTS_DIR = BASE_DIR / "transcripts"
 TRANSCRIPTS_DIR.mkdir(exist_ok=True)
 
+LOOP_CLOSURE_REPEAT_THRESHOLD = 3
+
+PATIENT_LOOP_CLOSURE_REPLIES = {
+    "부정": "아직 믿기지는 않지만, 같은 이야기를 더 반복해도 지금 당장 달라지지는 않겠죠. 오늘은 여기까지 듣겠습니다. 지금은 더 질문이 없습니다.",
+    "분노": "솔직히 납득되지는 않고 화도 나지만, 더 따져도 지금 당장 답이 달라지지는 않을 것 같습니다. 오늘은 여기까지 하겠습니다. 더 질문은 없습니다.",
+    "협상": "혹시 다른 방법이 있길 바랐는데, 지금은 더 물어도 같은 이야기가 반복될 것 같습니다. 일단 말씀하신 계획을 생각해보겠습니다. 더 질문은 없습니다.",
+    "우울": "머리가 멍해서 더 묻기가 어렵습니다. 오늘은 여기까지 하겠습니다. 지금은 더 질문이 없습니다.",
+}
+
+PATIENT_ALREADY_CLOSING_REPLY = "오늘은 여기까지 하겠습니다. 지금은 더 질문이 없습니다."
+
 
 def save_session_transcript(
     session_id: str,
@@ -89,8 +101,11 @@ def save_session_transcript(
         "difficulty": session["difficulty"],
         "initial_emotion": session["initial_emotion"],
         "turn_count": len(session["history"]),
+        "is_closing": session.get("is_closing", False),
         "transcript": session["history"],
     }
+    if session.get("loop_closure"):
+        transcript["loop_closure"] = session["loop_closure"]
     if report_id:
         transcript["report_id"] = report_id
 
@@ -469,6 +484,9 @@ def build_patient_system_prompt(case: dict, difficulty: str, initial_emotion: st
 3. 환자 역할에만 머무르세요. 평가자나 코치 역할은 하지 마세요.
 4. 답변은 한국어로, 실제 환자가 말하듯 자연스럽고 너무 길지 않게 하세요 (한 번에 2~4문장 정도).
 5. 당신은 절대 대화를 먼저 시작하지 않습니다 — 학습자의 첫 발화를 기다린 뒤에만 응답하세요.
+6. 학습자가 필요한 체크포인트를 놓쳐서 같은 종류의 감정 반응이나 질문을 이미 2번 이상 반복했다면,
+   세 번째부터는 억지로 같은 질문을 이어가지 마세요. 체념한 듯 "오늘은 여기까지 듣겠다",
+   "지금은 더 질문이 없다"는 식으로 종결 의사를 밝히고 면담 마무리 단계로 넘어가세요.
 """
 
 
@@ -628,6 +646,122 @@ def format_transcript(history: list[dict]) -> str:
     return "\n".join(f"{role_label.get(turn['role'], turn['role'])}: {turn['text']}" for turn in history)
 
 
+def _normalize_patient_reply(text: str) -> str:
+    without_stage_directions = re.sub(r"\([^)]*\)", " ", text)
+    normalized = re.sub(r"[^0-9A-Za-z가-힣?]+", " ", without_stage_directions.lower())
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _marker_hits(text: str, markers: tuple[str, ...]) -> int:
+    return sum(1 for marker in markers if marker in text)
+
+
+def _is_closing_reply(text: str) -> bool:
+    closing_markers = (
+        "더 질문은 없",
+        "더 질문이 없",
+        "더 궁금한 건 없",
+        "더 궁금한 것은 없",
+        "지금은 질문",
+        "여기까지",
+        "알겠습니다",
+        "생각해보겠습니다",
+        "생각해 보겠습니다",
+        "마무리",
+    )
+    return any(marker in text for marker in closing_markers)
+
+
+def classify_patient_reply_kind(text: str, initial_emotion: str) -> str:
+    """반복 루프 감지를 위한 가벼운 환자 발화 분류."""
+    normalized = _normalize_patient_reply(text)
+    if _is_closing_reply(normalized):
+        return "closure"
+
+    if any(marker in normalized for marker in ("치료", "수술", "항암", "약", "검사", "계획", "방법")):
+        if "?" in normalized or any(marker in normalized for marker in ("나요", "까요", "습니까", "있나요", "되나요")):
+            return "question:treatment"
+    if any(marker in normalized for marker in ("얼마나", "살", "생존", "죽", "가망", "시간")):
+        if "?" in normalized or any(marker in normalized for marker in ("나요", "까요", "습니까", "있나요", "되나요")):
+            return "question:prognosis"
+    if any(marker in normalized for marker in ("가족", "아이", "자녀", "남편", "아내", "배우자", "부모", "어머니", "아버지")):
+        if "?" in normalized or any(marker in normalized for marker in ("나요", "까요", "습니까", "알려", "말해야")):
+            return "question:family"
+    if any(marker in normalized for marker in ("왜", "원인", "잘못", "담배", "유전")):
+        if "?" in normalized or any(marker in normalized for marker in ("인가요", "거예요", "때문")):
+            return "question:cause"
+
+    emotion_markers = {
+        "부정": ("아니", "말도 안", "믿", "잘못", "오진", "다시 검사", "확실"),
+        "분노": ("왜", "화", "억울", "책임", "따지", "이럴 수", "납득", "잘못한"),
+        "협상": ("혹시", "방법", "다른", "살릴", "치료하면", "가능", "수술", "약", "기회"),
+        "우울": ("무섭", "두렵", "힘들", "막막", "끝", "죽", "가망", "눈물", "멍", "어떻게 살아"),
+    }
+    emotion_scores = {
+        emotion: _marker_hits(normalized, markers)
+        for emotion, markers in emotion_markers.items()
+    }
+    best_emotion, best_score = max(emotion_scores.items(), key=lambda item: item[1])
+    if best_score > 0:
+        return f"emotion:{best_emotion}"
+
+    return "other"
+
+
+def _token_similarity(left: str, right: str) -> float:
+    left_tokens = {token for token in _normalize_patient_reply(left).split() if len(token) >= 2}
+    right_tokens = {token for token in _normalize_patient_reply(right).split() if len(token) >= 2}
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+
+def count_consecutive_similar_patient_replies(history: list[dict], initial_emotion: str) -> tuple[int, str | None]:
+    """가장 최근 환자 발화와 비슷한 종류의 환자 발화가 연속 몇 번 나왔는지 센다."""
+    patient_turns = [turn["text"] for turn in history if turn.get("role") == "patient"]
+    if not patient_turns:
+        return 0, None
+
+    target_text = patient_turns[-1]
+    target_kind = classify_patient_reply_kind(target_text, initial_emotion)
+    if target_kind in {"closure", "other"}:
+        return 0, target_kind
+
+    count = 0
+    for text in reversed(patient_turns):
+        kind = classify_patient_reply_kind(text, initial_emotion)
+        if kind == target_kind or _token_similarity(text, target_text) >= 0.35:
+            count += 1
+            continue
+        break
+    return count, target_kind
+
+
+def build_loop_closure_reply(initial_emotion: str) -> str:
+    return PATIENT_LOOP_CLOSURE_REPLIES.get(initial_emotion, PATIENT_ALREADY_CLOSING_REPLY)
+
+
+def apply_loop_closure_if_needed(session: dict, patient_reply: str) -> tuple[str, bool]:
+    """환자 발화가 비슷한 종류로 3회 이상 반복되면 종결 발화로 바꾼다."""
+    simulated_history = [*session["history"], {"role": "patient", "text": patient_reply}]
+    repetition_count, response_kind = count_consecutive_similar_patient_replies(
+        simulated_history,
+        session["initial_emotion"],
+    )
+    if repetition_count < LOOP_CLOSURE_REPEAT_THRESHOLD:
+        return patient_reply, False
+
+    session["is_closing"] = True
+    session["loop_closure"] = {
+        "triggered": True,
+        "repeat_threshold": LOOP_CLOSURE_REPEAT_THRESHOLD,
+        "repeat_count": repetition_count,
+        "response_kind": response_kind,
+        "triggered_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return build_loop_closure_reply(session["initial_emotion"]), True
+
+
 # ---------------------------------------------------------------------------
 # API 모델
 # ---------------------------------------------------------------------------
@@ -661,6 +795,8 @@ class TurnRequest(BaseModel):
 class TurnResponse(BaseModel):
     patient_reply: str
     turn_count: int
+    should_finish: bool = False
+    closure_reason: str | None = None
 
 
 class EvaluateRequest(BaseModel):
@@ -739,14 +875,31 @@ async def take_turn(req: TurnRequest):
     history.append({"role": "learner", "text": req.message})
     save_session_transcript(req.session_id, session, case, status="awaiting_patient_reply")
 
+    if session.get("is_closing"):
+        patient_reply = PATIENT_ALREADY_CLOSING_REPLY
+        history.append({"role": "patient", "text": patient_reply})
+        save_session_transcript(req.session_id, session, case, status="closing")
+        return TurnResponse(
+            patient_reply=patient_reply,
+            turn_count=len(history),
+            should_finish=True,
+            closure_reason="already_closing",
+        )
+
     system_prompt = build_patient_system_prompt(case, session["difficulty"], session["initial_emotion"])
     transcript_so_far = format_transcript(history)
     patient_reply = await call_openai(system_prompt, transcript_so_far, OPENAI_MODEL_CHAT)
+    patient_reply, loop_closure_triggered = apply_loop_closure_if_needed(session, patient_reply)
 
     history.append({"role": "patient", "text": patient_reply})
-    save_session_transcript(req.session_id, session, case)
+    save_session_transcript(req.session_id, session, case, status="closing" if session.get("is_closing") else "in_progress")
 
-    return TurnResponse(patient_reply=patient_reply, turn_count=len(history))
+    return TurnResponse(
+        patient_reply=patient_reply,
+        turn_count=len(history),
+        should_finish=session.get("is_closing", False),
+        closure_reason="repeated_patient_reply" if loop_closure_triggered else None,
+    )
 
 
 @app.post("/api/evaluate", response_model=EvaluateResponse)
