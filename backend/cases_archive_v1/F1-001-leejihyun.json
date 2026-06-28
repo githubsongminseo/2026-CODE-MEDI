@@ -1,0 +1,110 @@
+{
+  "case_id": "F1-001-leejihyun",
+  "case_title": "위암 2기",
+  "display_name": "이지현 (여성, 53세)",
+  "case_family": "F1",
+  "ready_for_play": true,
+  "difficulty_tier": "중",
+
+  "info_breakdown": {
+    "shared_info": {
+      "기본_정보": "53세 여성, 오늘 혼자 병원 방문",
+      "증상_정보": "두 달 전부터 소화불량",
+      "이미_진행한_검사": "위내시경을 통한 조직검사, CT 시행",
+      "현재_치료_상태": "검사 결과 듣기 전 단계, 치료 시작 전"
+    },
+    "doctor_only_info": {
+      "진단_검사_결과": "조직검사 AGC Borrmann type 3, well-differentiated adenocarcinoma — 위암 2기. CT상 림프절 전이 없음, 타 장기 전이 없음",
+      "추가_검사_필요_여부": "명시되지 않음 (수술 전 일반적 평가 외 추가 정밀검사 필요성은 케이스에 별도 언급 없음)",
+      "향후_치료_방향": "수술적 절제(위 절제술)가 1차 표준 치료. 수술 후 항암 보조치료 고려 가능. 항암치료 단독이 수술을 대체하는 1차 치료는 아님."
+    },
+    "patient_only_info": {
+      "가족력_및_걱정": "아버지가 위암 수술 후 돌아가신 경험이 있어, 본인도 같은 결과를 겪게 될까 걱정함"
+    }
+  },
+
+  "demo_narrative": "환자는 53세 여성으로, 두 달 전부터 소화불량이 있어 본원에서 위내시경을 통한 조직검사와 CT를 시행하였고, 오늘은 혼자 검사 결과를 듣기 위해 내원하였다. 의사만 알고 있는 정보로는 조직검사 결과 위암 2기(AGC Borrmann type 3, well-differentiated adenocarcinoma)로 확인되었으나, CT상 림프절 및 타 장기로의 전이는 없어 수술적 절제가 가능한 단계라는 점이다. 향후 치료 방향은 수술적 절제(위 절제술)를 1차로 시행하고, 이후 필요에 따라 항암 보조치료를 고려하는 것이다. 환자만 알고 있는 정보로는 아버지가 과거 위암으로 수술을 받았으나 결국 돌아가신 경험이 있어, 자신도 같은 결과를 겪게 되는 것은 아닌지 크게 걱정하고 있다.",
+
+  "chart_visible_to_learner": {
+    "이름": "이지현",
+    "나이_성별": "53세 여성",
+    "증상": "두 달 전부터 소화불량.",
+    "검사_결과": "조직검사상 AGC Borrmann type 3, well-differentiated adenocarcinoma로 위암 2기 확인. CT상 림프절 전이 없음, 타 장기 전이 없음.",
+    "향후_치료_계획": "수술적 절제(위 절제술)가 1차 표준 치료. 수술 후 항암 보조치료 고려 가능. 항암치료 단독이 수술을 대체하는 1차 치료는 아님."
+  },
+
+  "vitals": {
+    "blood_pressure": "124/80 mmHg",
+    "pulse": "81/min",
+    "respiration": "18/min",
+    "temperature": "36.5C"
+  },
+
+  "instruction_to_learner": "검사 결과에 대해 설명하고, 향후 치료 계획에 대해 환자에게 설명하시오. 신체 진찰은 시행하지 마시오.",
+
+  "modifiers": {
+    "recipient": "환자 본인",
+    "urgency": "중간",
+    "information_preference": "조금씩 듣고 싶음",
+    "emotional_reaction": ["부정", "수용"],
+    "ethical_legal_issue": null,
+    "decision_pressure": "공동의사결정",
+    "health_literacy": "보통",
+    "support_system": "혼자 옴",
+    "medical_uncertainty": "확진"
+  },
+
+  "prior_encounter_context": {
+    "_comment": "케이스 패밀리에 따라 달라지는 부분. F1(새 진단 전달)은 초진이라 환자가 아무것도 모르는 상태. F2 등에서는 이전 진단/치료 이력이 채워져야 함.",
+    "has_prior_diagnosis": false,
+    "summary": "초진. 이전에 이 질환에 대한 진단이나 치료를 받은 적 없음."
+  },
+
+  "patient_persona": {
+    "background": "혼자 병원에 옴. 평소 특별한 증상 없었고 이전과 비슷한 상태였음. 검사 결과가 걱정되고 불안한 상태로 내원.",
+    "perception_before_explanation": "소화불량으로 이것저것 검사받다가 조직검사까지 하게 되어 큰 병일까봐 걱정하고 있음. 결과가 구체적으로 어떻게 나올지는 상상하지 못함. (이 케이스는 초진이므로 진단명/치료계획에 대해 아는 바가 전혀 없음)",
+    "invitation": "혼자 듣겠다고 함. 검사 결과뿐 아니라 치료 계획까지 다 듣고 싶어함.",
+    "emotional_arc_required_beats": [
+      {
+        "emotion": "부정",
+        "trigger_condition": "진단명(암)이 명확히 전달된 직후",
+        "example_lines": [
+          "암이라고요? 당황스러운데요. 2년 전에는 정상이었는데 왜 이런 결과가 나왔나요?",
+          "결과가 바뀐 거 아닌가요?"
+        ]
+      },
+      {
+        "emotion": "수용",
+        "trigger_condition": "의사가 부정 반응에 충분히 공감하고, 치료 가능성(수술 가능 단계, 전이 없음)을 설명한 후",
+        "example_lines": [
+          "나아질 수 있겠죠?",
+          "아버지도 위암 수술 받고 돌아가셨는데, 저도 그러지 않을까요?"
+        ]
+      }
+    ],
+    "family_history_hook": "아버지가 위암 수술 후 돌아가심 — 환자 본인이 먼저 이 이야기를 꺼낼 수 있고, 학습자가 이걸 다루는지가 평가 포인트.",
+    "closing_behavior": "수술이 필요하다는 설명에 놀랐으나 결국 수용함. 가족(특히 남편)에게는 본인이 직접 말하겠다고 함.",
+    "tone_notes": "차분하게 묻고, 화내거나 흥분하지는 않음. 부정 단계에서도 공격적이지 않고 '당황스럽다'는 정도. 의학적 설명을 천천히, 쉬운 말로 해주면 잘 따라옴. 질문은 구체적이고 직접적임(예: '수술은 안 하나요?', '항암치료만 받는 건가요?') — 모호한 답변에는 다시 명확한 답을 요구함.",
+    "ppi_personality_note": "이 환자는 차분하고 직접적인 질문을 선호하며 감정적으로 격하지 않음. PPI 평가 시 이 환자의 성향과 욕구(구체적이고 명확한 답을 원함)를 기준으로 판단할 것 — 모든 환자에게 동일한 절대적 기준을 적용하지 말 것."
+  },
+
+  "checklist_scope": {
+    "core_required": [
+      "E1","E2","E3","E4","E5","E6","E7","E8","E9","E10",
+      "E11","E12","E13","E14","E15","E17","E18"
+    ],
+    "candidate_active": [
+      "C1-1","C1-2","C1-3","C1-4","C1-6"
+    ],
+    "candidate_excluded_for_this_case": [
+      "C1-5"
+    ],
+    "candidate_excluded_reason": {
+      "C1-5": "유전성/감염성 질환이 아니므로 가족에게 필요한 의학정보 항목은 이 케이스에 적용되지 않음"
+    },
+    "critical_fail_watchlist": [
+      "CF1","CF2","CF3","CF4","CF5","CF6","CF7"
+    ],
+    "emotion_checklists_expected": ["부정", "수용"]
+  }
+}
