@@ -113,6 +113,15 @@ uvicorn main:app --reload --port 8000
 - OpenAI API 모델명/요청 형식이 바뀌면 `main.py`의 `call_openai()`를 최신 문서 기준으로
   맞춰야 합니다.
 
+## 실시간 transcript 저장
+
+세션이 시작되면 `backend/transcripts/{session_id}.json` 파일이 만들어지고, 학습자 발화와
+환자 응답이 추가될 때마다 같은 파일이 갱신됩니다. 평가를 누르지 않아도 대화 기록은 이
+파일에 남습니다.
+
+- `GET /api/transcripts` — 실시간 저장된 transcript 목록(메타데이터)
+- `GET /api/transcripts/{session_id}` — 해당 세션 transcript 전체
+
 ## 레포트 저장 (DB) 및 합성 데이터 생성
 
 평가가 끝날 때마다 **대화 스크립트 전체 + 체크리스트 + 감정반응 + PPI + 약점분석**을 한

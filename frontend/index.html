@@ -289,6 +289,9 @@ const API_BASE = "http://localhost:8000";
 let sessionId = null;
 let coreLabels = {};
 let emotionLabels = {};
+let isBusy = false;
+let hasCompletedTurn = false;
+let sessionGeneration = 0;
 
 const chatWindow = document.getElementById("chat-window");
 const messageInput = document.getElementById("message-input");
@@ -320,20 +323,34 @@ function addBubble(role, text) {
   chatWindow.scrollTop = chatWindow.scrollHeight;
 }
 
+function syncControls(msg) {
+  const canUseSession = Boolean(sessionId) && !isBusy;
+  sendBtn.disabled = !canUseSession;
+  messageInput.disabled = !canUseSession;
+  finishBtn.disabled = !canUseSession || !hasCompletedTurn;
+  if (msg !== undefined) statusLine.textContent = msg;
+}
+
 function setBusy(busy, msg = "") {
-  sendBtn.disabled = busy;
-  messageInput.disabled = busy;
-  finishBtn.disabled = busy;
-  statusLine.textContent = msg;
+  isBusy = busy;
+  syncControls(msg);
 }
 
 async function startSession(difficulty, caseId, initialEmotion) {
+  const generation = ++sessionGeneration;
   currentDifficulty = difficulty;
+  sessionId = null;
+  coreLabels = {};
+  emotionLabels = {};
+  hasCompletedTurn = false;
   screenDifficulty.style.display = "none";
   screenChat.style.display = "block";
   screenReport.classList.remove("visible");
 
   chatWindow.innerHTML = "";
+  messageInput.value = "";
+  chartPanel.style.display = "none";
+  chartToggleBtn.textContent = "📋 환자 차트 보기";
   setBusy(true, "케이스를 불러오는 중...");
   try {
     const body = { difficulty };
@@ -346,6 +363,7 @@ async function startSession(difficulty, caseId, initialEmotion) {
     });
     if (!res.ok) throw new Error(`서버 응답 오류 (${res.status})`);
     const data = await res.json();
+    if (generation !== sessionGeneration) return;
     sessionId = data.session_id;
     coreLabels = data.core_labels;
     emotionLabels = data.emotion_labels;
@@ -353,6 +371,8 @@ async function startSession(difficulty, caseId, initialEmotion) {
     renderChartPanel(data.chart);
     setBusy(false, "당신이 먼저 인사하며 문진을 시작하세요 (예: '안녕하세요, 담당 의료진 OOO입니다.')");
   } catch (err) {
+    if (generation !== sessionGeneration) return;
+    sessionId = null;
     setBusy(false, "");
     instructionBox.textContent = `백엔드 연결 실패: ${err.message}. 백엔드 서버(localhost:8000)가 실행 중인지 확인하세요.`;
   }
@@ -381,7 +401,9 @@ chartToggleBtn.addEventListener("click", () => {
 
 async function sendMessage() {
   const text = messageInput.value.trim();
-  if (!text || !sessionId) return;
+  if (!text || !sessionId || isBusy) return;
+  const activeSessionId = sessionId;
+  const generation = sessionGeneration;
 
   addBubble("learner", text);
   messageInput.value = "";
@@ -391,16 +413,19 @@ async function sendMessage() {
     const res = await fetch(`${API_BASE}/api/turn`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, message: text }),
+      body: JSON.stringify({ session_id: activeSessionId, message: text }),
     });
     if (!res.ok) {
       const err = await res.json();
       throw new Error(err.detail || `서버 응답 오류 (${res.status})`);
     }
     const data = await res.json();
+    if (generation !== sessionGeneration || sessionId !== activeSessionId) return;
     addBubble("patient", data.patient_reply);
+    hasCompletedTurn = true;
     setBusy(false, "");
   } catch (err) {
+    if (generation !== sessionGeneration || sessionId !== activeSessionId) return;
     setBusy(false, `오류: ${err.message}`);
   }
 }
@@ -500,25 +525,29 @@ function renderEmotionResponse(bannerEl, listEl, emotionResponse) {
 }
 
 async function finishAndEvaluate() {
-  if (!sessionId) return;
+  if (!sessionId || !hasCompletedTurn || isBusy) return;
+  const activeSessionId = sessionId;
+  const generation = sessionGeneration;
   setBusy(true, "대화를 평가하는 중... (체크리스트 + PPI 두 번 호출)");
 
   try {
     const res = await fetch(`${API_BASE}/api/evaluate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId }),
+      body: JSON.stringify({ session_id: activeSessionId }),
     });
     if (!res.ok) {
       const err = await res.json();
       throw new Error(err.detail || `서버 응답 오류 (${res.status})`);
     }
     const data = await res.json();
+    if (generation !== sessionGeneration || sessionId !== activeSessionId) return;
     renderReport(data);
     screenChat.style.display = "none";
     screenReport.classList.add("visible");
     setBusy(false, "");
   } catch (err) {
+    if (generation !== sessionGeneration || sessionId !== activeSessionId) return;
     setBusy(false, `평가 실패: ${err.message}`);
   }
 }
@@ -614,6 +643,11 @@ document.querySelectorAll(".diff-btn").forEach((btn) => {
 });
 
 restartBtn.addEventListener("click", () => {
+  sessionGeneration += 1;
+  sessionId = null;
+  hasCompletedTurn = false;
+  isBusy = false;
+  syncControls("");
   screenChat.style.display = "none";
   screenDifficulty.style.display = "block";
 });
@@ -631,15 +665,13 @@ retryRecommendedBtn.addEventListener("click", () => {
   startSession(diff, caseId, emotion);
 });
 
-// 첫 메시지가 오면 종료 버튼 활성화 (최소 1턴 이상 진행 후 평가 가능하게)
+// 첫 메시지가 오면 종료 버튼 활성화 상태를 다시 계산한다.
 const observer = new MutationObserver(() => {
-  const learnerMsgs = chatWindow.querySelectorAll(".bubble.learner").length;
-  finishBtn.disabled = learnerMsgs === 0;
+  syncControls();
 });
 observer.observe(chatWindow, { childList: true });
 
-messageInput.disabled = false;
-sendBtn.disabled = false;
+syncControls("");
 // 첫 화면은 난이도 선택 화면 (screen-difficulty가 기본으로 보이는 상태이므로 별도 호출 불필요)
 </script>
 </body>

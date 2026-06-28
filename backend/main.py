@@ -64,6 +64,37 @@ if not PLAYABLE_CASE_IDS:
 REPORTS_DIR = BASE_DIR / "reports"
 REPORTS_DIR.mkdir(exist_ok=True)
 
+TRANSCRIPTS_DIR = BASE_DIR / "transcripts"
+TRANSCRIPTS_DIR.mkdir(exist_ok=True)
+
+
+def save_session_transcript(
+    session_id: str,
+    session: dict,
+    case: dict,
+    status: str = "in_progress",
+    report_id: str | None = None,
+) -> None:
+    """현재 세션 transcript를 턴마다 저장한다."""
+    transcript = {
+        "session_id": session_id,
+        "status": status,
+        "created_at": session.get("created_at") or datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "case_id": session["case_id"],
+        "case_title": case["case_title"],
+        "display_name": case["display_name"],
+        "difficulty": session["difficulty"],
+        "initial_emotion": session["initial_emotion"],
+        "turn_count": len(session["history"]),
+        "transcript": session["history"],
+    }
+    if report_id:
+        transcript["report_id"] = report_id
+
+    out_path = TRANSCRIPTS_DIR / f"{session_id}.json"
+    out_path.write_text(json.dumps(transcript, ensure_ascii=False, indent=2), encoding="utf-8")
+
 
 def save_report(
     session_id: str,
@@ -659,8 +690,10 @@ async def start_session(req: StartSessionRequest):
         "case_id": case_id,
         "difficulty": difficulty,
         "initial_emotion": initial_emotion,
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "history": [],  # 학습자가 먼저 인사하며 시작하므로 비어있는 상태로 시작
     }
+    save_session_transcript(session_id, SESSIONS[session_id], case)
 
     scope = case["checklist_scope"]
     core_labels = {code: CHECKLIST_REF["core_checklist"][code]["label"] for code in scope["core_required"]}
@@ -693,12 +726,14 @@ async def take_turn(req: TurnRequest):
     case = ALL_CASES[session["case_id"]]
     history = session["history"]
     history.append({"role": "learner", "text": req.message})
+    save_session_transcript(req.session_id, session, case, status="awaiting_patient_reply")
 
     system_prompt = build_patient_system_prompt(case, session["difficulty"], session["initial_emotion"])
     transcript_so_far = format_transcript(history)
     patient_reply = await call_openai(system_prompt, transcript_so_far, OPENAI_MODEL_CHAT)
 
     history.append({"role": "patient", "text": patient_reply})
+    save_session_transcript(req.session_id, session, case)
 
     return TurnResponse(patient_reply=patient_reply, turn_count=len(history))
 
@@ -748,6 +783,7 @@ async def evaluate_session(req: EvaluateRequest):
         recommendation=recommendation,
         source="live",
     )
+    save_session_transcript(req.session_id, session, case, status="evaluated", report_id=report_id)
 
     return EvaluateResponse(
         checklist_axis=checklist_axis_parsed,
@@ -757,6 +793,41 @@ async def evaluate_session(req: EvaluateRequest):
         recommendation=recommendation,
         report_id=report_id,
     )
+
+
+@app.get("/api/transcripts")
+async def list_transcripts(status: str | None = None):
+    """실시간 저장된 transcript 목록(메타데이터만)을 반환한다."""
+    results = []
+    for f in sorted(TRANSCRIPTS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        transcript = json.loads(f.read_text(encoding="utf-8"))
+        if status and transcript.get("status") != status:
+            continue
+        results.append({
+            "session_id": transcript["session_id"],
+            "status": transcript.get("status", "unknown"),
+            "created_at": transcript["created_at"],
+            "updated_at": transcript["updated_at"],
+            "case_id": transcript["case_id"],
+            "case_title": transcript["case_title"],
+            "difficulty": transcript["difficulty"],
+            "initial_emotion": transcript["initial_emotion"],
+            "turn_count": transcript["turn_count"],
+            "report_id": transcript.get("report_id"),
+        })
+    return results
+
+
+@app.get("/api/transcripts/{session_id}")
+async def get_transcript(session_id: str):
+    """실시간 저장된 transcript 전체를 반환한다."""
+    if "/" in session_id or "\\" in session_id:
+        raise HTTPException(status_code=400, detail="올바르지 않은 세션 ID입니다.")
+
+    path = TRANSCRIPTS_DIR / f"{session_id}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"세션 transcript '{session_id}'를 찾을 수 없습니다.")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 @app.get("/api/reports")
