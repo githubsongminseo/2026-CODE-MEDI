@@ -72,14 +72,12 @@ TRANSCRIPTS_DIR.mkdir(exist_ok=True)
 
 LOOP_CLOSURE_REPEAT_THRESHOLD = 3
 
-PATIENT_LOOP_CLOSURE_REPLIES = {
-    "부정": "아직 믿기지는 않지만, 같은 이야기를 더 반복해도 지금 당장 달라지지는 않겠죠. 오늘은 여기까지 듣겠습니다. 지금은 더 질문이 없습니다.",
-    "분노": "솔직히 납득되지는 않고 화도 나지만, 더 따져도 지금 당장 답이 달라지지는 않을 것 같습니다. 오늘은 여기까지 하겠습니다. 더 질문은 없습니다.",
-    "협상": "혹시 다른 방법이 있길 바랐는데, 지금은 더 물어도 같은 이야기가 반복될 것 같습니다. 일단 말씀하신 계획을 생각해보겠습니다. 더 질문은 없습니다.",
-    "우울": "머리가 멍해서 더 묻기가 어렵습니다. 오늘은 여기까지 하겠습니다. 지금은 더 질문이 없습니다.",
+PATIENT_LOOP_ACKNOWLEDGEMENT_REPLIES = {
+    "부정": "아직 믿기지는 않지만, 알겠습니다. 지금은 더 질문이 없습니다.",
+    "분노": "솔직히 납득되지는 않지만, 알겠습니다. 더 질문은 없습니다.",
+    "협상": "그렇군요. 일단 알겠습니다. 지금은 더 질문이 없습니다.",
+    "우울": "네... 알겠습니다. 지금은 더 질문이 없습니다.",
 }
-
-PATIENT_ALREADY_CLOSING_REPLY = "오늘은 여기까지 하겠습니다. 지금은 더 질문이 없습니다."
 
 
 def save_session_transcript(
@@ -485,8 +483,9 @@ def build_patient_system_prompt(case: dict, difficulty: str, initial_emotion: st
 4. 답변은 한국어로, 실제 환자가 말하듯 자연스럽고 너무 길지 않게 하세요 (한 번에 2~4문장 정도).
 5. 당신은 절대 대화를 먼저 시작하지 않습니다 — 학습자의 첫 발화를 기다린 뒤에만 응답하세요.
 6. 학습자가 필요한 체크포인트를 놓쳐서 같은 종류의 감정 반응이나 질문을 이미 2번 이상 반복했다면,
-   세 번째부터는 억지로 같은 질문을 이어가지 마세요. 체념한 듯 "오늘은 여기까지 듣겠다",
-   "지금은 더 질문이 없다"는 식으로 종결 의사를 밝히고 면담 마무리 단계로 넘어가세요.
+   세 번째부터는 억지로 같은 질문을 이어가지 마세요. "알겠습니다", "지금은 더 질문이 없습니다"
+   같은 단정형 반응으로만 답하세요. "오늘은 여기까지 듣겠습니다/하겠습니다"처럼 환자가 면담
+   종료를 선언하지 말고, 이후 마무리 멘트는 학습자(의사 역할)가 할 수 있게 남겨두세요.
 """
 
 
@@ -737,12 +736,12 @@ def count_consecutive_similar_patient_replies(history: list[dict], initial_emoti
     return count, target_kind
 
 
-def build_loop_closure_reply(initial_emotion: str) -> str:
-    return PATIENT_LOOP_CLOSURE_REPLIES.get(initial_emotion, PATIENT_ALREADY_CLOSING_REPLY)
+def build_loop_acknowledgement_reply(initial_emotion: str) -> str:
+    return PATIENT_LOOP_ACKNOWLEDGEMENT_REPLIES.get(initial_emotion, "알겠습니다. 지금은 더 질문이 없습니다.")
 
 
-def apply_loop_closure_if_needed(session: dict, patient_reply: str) -> tuple[str, bool]:
-    """환자 발화가 비슷한 종류로 3회 이상 반복되면 종결 발화로 바꾼다."""
+def apply_loop_acknowledgement_if_needed(session: dict, patient_reply: str) -> tuple[str, bool]:
+    """환자 발화가 비슷한 종류로 3회 이상 반복되면 추가 질문이 없다는 발화로 바꾼다."""
     simulated_history = [*session["history"], {"role": "patient", "text": patient_reply}]
     repetition_count, response_kind = count_consecutive_similar_patient_replies(
         simulated_history,
@@ -751,15 +750,15 @@ def apply_loop_closure_if_needed(session: dict, patient_reply: str) -> tuple[str
     if repetition_count < LOOP_CLOSURE_REPEAT_THRESHOLD:
         return patient_reply, False
 
-    session["is_closing"] = True
     session["loop_closure"] = {
         "triggered": True,
         "repeat_threshold": LOOP_CLOSURE_REPEAT_THRESHOLD,
         "repeat_count": repetition_count,
         "response_kind": response_kind,
+        "action": "patient_acknowledged_no_questions",
         "triggered_at": datetime.now(timezone.utc).isoformat(),
     }
-    return build_loop_closure_reply(session["initial_emotion"]), True
+    return build_loop_acknowledgement_reply(session["initial_emotion"]), True
 
 
 # ---------------------------------------------------------------------------
@@ -875,30 +874,19 @@ async def take_turn(req: TurnRequest):
     history.append({"role": "learner", "text": req.message})
     save_session_transcript(req.session_id, session, case, status="awaiting_patient_reply")
 
-    if session.get("is_closing"):
-        patient_reply = PATIENT_ALREADY_CLOSING_REPLY
-        history.append({"role": "patient", "text": patient_reply})
-        save_session_transcript(req.session_id, session, case, status="closing")
-        return TurnResponse(
-            patient_reply=patient_reply,
-            turn_count=len(history),
-            should_finish=True,
-            closure_reason="already_closing",
-        )
-
     system_prompt = build_patient_system_prompt(case, session["difficulty"], session["initial_emotion"])
     transcript_so_far = format_transcript(history)
     patient_reply = await call_openai(system_prompt, transcript_so_far, OPENAI_MODEL_CHAT)
-    patient_reply, loop_closure_triggered = apply_loop_closure_if_needed(session, patient_reply)
+    patient_reply, loop_acknowledgement_triggered = apply_loop_acknowledgement_if_needed(session, patient_reply)
 
     history.append({"role": "patient", "text": patient_reply})
-    save_session_transcript(req.session_id, session, case, status="closing" if session.get("is_closing") else "in_progress")
+    save_session_transcript(req.session_id, session, case, status="in_progress")
 
     return TurnResponse(
         patient_reply=patient_reply,
         turn_count=len(history),
-        should_finish=session.get("is_closing", False),
-        closure_reason="repeated_patient_reply" if loop_closure_triggered else None,
+        should_finish=False,
+        closure_reason="repeated_patient_reply" if loop_acknowledgement_triggered else None,
     )
 
 
