@@ -23,6 +23,7 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 load_dotenv()
@@ -37,6 +38,7 @@ OPENAI_MODEL_EVAL = os.getenv("OPENAI_MODEL_EVAL", "gpt-4o")
 OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 
 BASE_DIR = Path(__file__).parent
+FRONTEND_DIR = BASE_DIR.parent / "frontend"
 CHECKLIST_REF = json.loads((BASE_DIR / "checklist_reference.json").read_text(encoding="utf-8"))
 
 # ---------------------------------------------------------------------------
@@ -890,3 +892,30 @@ async def health():
         "total_cases_loaded": len(ALL_CASES),
         "playable_cases": PLAYABLE_CASE_IDS,
     }
+
+
+@app.get("/")
+async def serve_frontend_index():
+    index_path = FRONTEND_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="프론트엔드 index.html을 찾을 수 없습니다.")
+    return FileResponse(index_path)
+
+
+@app.get("/{frontend_path:path}")
+async def serve_frontend_asset(frontend_path: str):
+    if frontend_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API 경로를 찾을 수 없습니다.")
+
+    frontend_root = FRONTEND_DIR.resolve()
+    target_path = (frontend_root / frontend_path).resolve()
+    if frontend_root not in target_path.parents and target_path != frontend_root:
+        raise HTTPException(status_code=404, detail="프론트엔드 파일을 찾을 수 없습니다.")
+
+    if target_path.is_file():
+        return FileResponse(target_path)
+
+    index_path = frontend_root / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="프론트엔드 index.html을 찾을 수 없습니다.")
+    return FileResponse(index_path)

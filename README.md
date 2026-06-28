@@ -78,18 +78,15 @@ cpx-prototype/
 
 ## 실행 방법
 
-### 1. 백엔드 띄우기
+### 1. 앱 띄우기
 ```bash
 cd backend
 pip install -r requirements.txt
 cp .env.example .env   # OPENAI_API_KEY 입력
 uvicorn main:app --reload --port 8000
 ```
-`http://localhost:8000/api/health` 접속 시
-`{"status":"ok","total_cases_loaded":6,"playable_cases":[...6개...]}` 확인.
-
-### 2. 프론트엔드 열기
-`frontend/index.html`을 브라우저로 열면 됩니다 (백엔드 8000번 포트 실행 중이어야 함).
+`http://localhost:8000/` 접속 시 프론트엔드가 열립니다. `http://localhost:8000/api/health` 접속 시
+`{"status":"ok","total_cases_loaded":10,"playable_cases":[...10개...]}` 확인.
 
 ## 사용 흐름
 1. 난이도(하/중/상) 선택 — 감정 단서 명시성만 조절.
